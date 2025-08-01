@@ -16,7 +16,6 @@ from homeassistant.helpers import selector
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
-loop = asyncio.get_event_loop()
 
 # TODO adjust the data schema to the data that you need
 STEP_USER_DATA_SCHEMA = vol.Schema(
@@ -151,21 +150,24 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
     
     def _get_program_map(self) -> dict[str, int]:
-        """Get mapping of program names to IDs."""
+        """Get mapping of program names to IDs (manual programs only)."""
         program_map = {}
         if self._devices:
             device = self._devices[0]
             for program in device.programs:
-                program_map[program.name] = program.id
+                # Only include manual programs (type 2)
+                if program.program_type == 2:
+                    program_map[program.name] = program.id
         return program_map
     
     def _build_programs_schema(self) -> vol.Schema:
-        """Build schema with actual program names."""
+        """Build schema with actual program names (manual programs only)."""
         if not self._devices:
             return DEFAULT_PROGRAMS_SCHEMA
             
         device = self._devices[0]
-        program_names = [p.name for p in device.programs]
+        # Only include manual programs (type 2)
+        program_names = [p.name for p in device.programs if p.program_type == 2]
         
         if not program_names:
             return DEFAULT_PROGRAMS_SCHEMA
@@ -242,8 +244,10 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             return self.async_abort(reason="no_devices")
             
         device = devices[0]
-        program_names = [p.name for p in device.programs]
-        program_map = {p.name: p.id for p in device.programs}
+        # Only include manual programs (type 2)
+        manual_programs = [p for p in device.programs if p.program_type == 2]
+        program_names = [p.name for p in manual_programs]
+        program_map = {p.name: p.id for p in manual_programs}
         
         # Reverse map current IDs to names
         current_data = self.config_entry.data
