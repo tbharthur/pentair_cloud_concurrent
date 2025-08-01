@@ -268,6 +268,7 @@ class PentairCloudHub:
                                 device.motor_speed = int(fields.get("s19", {}).get("value", "0")) / 10
                                 device.power = int(fields.get("s18", {}).get("value", "0"))
                                 device.flow_rate = int(fields.get("s26", {}).get("value", "0")) / 10
+                                # Keep physical relay status for reference
                                 device.relay1_on = fields.get("s21", {}).get("value", "0") == "1"
                                 device.relay2_on = fields.get("s22", {}).get("value", "0") == "1"
                                 

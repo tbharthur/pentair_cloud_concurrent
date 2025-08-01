@@ -134,8 +134,16 @@ class PentairRelaySwitch(SwitchEntity):
         """Update the relay state."""
         self._hub.update_pentair_devices_status()
         
-        # Check relay status from device
-        if self._relay_number == 1:
-            self._is_on = self._device.relay1_on
-        else:
-            self._is_on = self._device.relay2_on
+        # Check if this relay's program is active
+        relay_program_id = self._relay_programs[self._relay_name]
+        
+        # Find the program and check if it's active
+        for program in self._device.programs:
+            if program.id == relay_program_id:
+                self._is_on = program.running  # This checks e10 = 3
+                break
+        
+        if DEBUG_INFO:
+            self._logger.info(
+                f"Relay {self._relay_name} program {relay_program_id} is {'active' if self._is_on else 'inactive'}"
+            )
