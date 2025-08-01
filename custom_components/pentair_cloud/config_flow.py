@@ -196,11 +196,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
 
     def __init__(self, config_entry):
         """Initialize options flow."""
-        self.config_entry = config_entry
-
-    def __init__(self, config_entry):
-        """Initialize options flow."""
-        self.config_entry = config_entry
+        # Don't store config_entry - access it via self.config_entry property
         self._program_map = {}
 
     async def async_step_init(

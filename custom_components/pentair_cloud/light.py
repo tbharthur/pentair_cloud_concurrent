@@ -29,14 +29,27 @@ async def async_setup_entry(
     lights_program = config_entry.data.get("relay_lights", 5)
     
     entities = []
+    existing_ids = set()
+    
     for device in devices:
         # Add program entities (hidden by default for diagnostics)
         for program in device.programs:
-            entities.append(PentairProgramLight(_LOGGER, hub, device, program))
+            entity = PentairProgramLight(_LOGGER, hub, device, program)
+            if entity.unique_id not in existing_ids:
+                entities.append(entity)
+                existing_ids.add(entity.unique_id)
+            else:
+                _LOGGER.warning(f"Skipping duplicate program light: {entity.unique_id}")
             
         # Create light entity for pool lights
-        entities.append(PentairRelayLight(_LOGGER, hub, device, lights_program))
+        entity = PentairRelayLight(_LOGGER, hub, device, lights_program)
+        if entity.unique_id not in existing_ids:
+            entities.append(entity)
+            existing_ids.add(entity.unique_id)
+        else:
+            _LOGGER.warning(f"Skipping duplicate relay light: {entity.unique_id}")
     
+    _LOGGER.info(f"Setting up {len(entities)} light entities")
     async_add_entities(entities)
 
 
@@ -162,14 +175,7 @@ class PentairRelayLight(LightEntity):
         if DEBUG_INFO:
             self._logger.info(f"Turning on pool lights")
         
-        # Check if pump is running
-        if not self._device.pump_running:
-            self._logger.warning(
-                "Cannot turn on lights - pump is not running"
-            )
-            return
-        
-        # Activate lights program
+        # Activate lights program (no pump check - lights work independently)
         await self.hass.async_add_executor_job(
             self._hub.activate_program_concurrent,
             self._device.pentair_device_id,

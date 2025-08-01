@@ -48,17 +48,23 @@ async def async_setup_entry(
     heater_program = config_entry.data.get("relay_heater", 6)
     
     entities = []
-    for device in devices:
-        entities.append(
-            PentairPoolHeater(
-                _LOGGER, 
-                hub, 
-                device, 
-                heater_program,
-                temperature_sensor
-            )
-        )
+    existing_ids = set()
     
+    for device in devices:
+        entity = PentairPoolHeater(
+            _LOGGER, 
+            hub, 
+            device, 
+            heater_program,
+            temperature_sensor
+        )
+        if entity.unique_id not in existing_ids:
+            entities.append(entity)
+            existing_ids.add(entity.unique_id)
+        else:
+            _LOGGER.warning(f"Skipping duplicate climate entity: {entity.unique_id}")
+    
+    _LOGGER.info(f"Setting up {len(entities)} climate entities")
     async_add_entities(entities)
 
 
