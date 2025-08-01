@@ -129,6 +129,10 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "relay_lights": program_map.get(user_input["relay_lights"], 5),
                 "relay_heater": program_map.get(user_input["relay_heater"], 6),
             }
+            # Add temperature sensor if selected
+            if user_input.get("temperature_sensor"):
+                mapped_data["temperature_sensor"] = user_input["temperature_sensor"]
+                
             self._data.update(mapped_data)
             return self.async_create_entry(title="PentairCloud", data=self._data)
 
@@ -213,6 +217,10 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 "relay_lights": self._program_map.get(user_input["relay_lights"], 5),
                 "relay_heater": self._program_map.get(user_input["relay_heater"], 6),
             }
+            # Add temperature sensor if selected
+            if "temperature_sensor" in user_input:
+                mapped_data["temperature_sensor"] = user_input["temperature_sensor"]
+                
             # Update config entry with new program mappings
             self.hass.config_entries.async_update_entry(
                 self.config_entry,

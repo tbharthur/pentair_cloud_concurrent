@@ -325,6 +325,9 @@ class PentairCloudHub:
                 field_name = f"zp{program_id}e10"
                 payload = {"payload": {field_name: "3"}}
                 
+                if DEBUG_INFO:
+                    self.LOGGER.info(f"Sending payload: {payload} to {endpoint}")
+                
                 response = requests.put(
                     endpoint,
                     auth=self.get_AWS_auth(),
@@ -332,8 +335,13 @@ class PentairCloudHub:
                     data=json.dumps(payload),
                 )
                 
+                if DEBUG_INFO:
+                    self.LOGGER.info(f"Response status: {response.status_code}")
+                    self.LOGGER.info(f"Response body: {response.text}")
+                
                 response_data = response.json()
-                if response_data["data"]["code"] != "set_device_success":
+                if response_data.get("data", {}).get("code") != "set_device_success":
+                    self.LOGGER.error(f"Failed to activate program: {response_data}")
                     raise Exception("Wrong response code activating program")
                 
                 # Find and update the program state

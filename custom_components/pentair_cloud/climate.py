@@ -34,7 +34,10 @@ async def async_setup_entry(
     """Set up Pentair pool heater climate."""
     # Only create climate entity if temperature sensor is configured
     temperature_sensor = config_entry.data.get("temperature_sensor")
+    _LOGGER.info(f"Climate setup: temperature_sensor = {temperature_sensor}")
+    
     if not temperature_sensor:
+        _LOGGER.info("No temperature sensor configured, skipping climate entity")
         return
     
     hub = hass.data[DOMAIN][config_entry.entry_id]["pentair_cloud_hub"]
