@@ -1,4 +1,4 @@
-"""The PentairCloud integration."""
+"""The Modified PentairCloud integration with concurrent program support."""
 from __future__ import annotations
 
 from homeassistant.config_entries import ConfigEntry
@@ -11,11 +11,12 @@ from homeassistant.config_entries import ConfigEntry, SOURCE_IMPORT
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
 import logging
-from .pentaircloud import PentairCloudHub
+from .pentaircloud_modified import PentairCloudHub
 
 from .const import DOMAIN
 
-PLATFORMS: list[Platform] = [Platform.LIGHT]
+# Add number and switch platforms
+PLATFORMS: list[Platform] = [Platform.LIGHT, Platform.NUMBER, Platform.SWITCH]
 
 CONFIG_SCHEMA = vol.Schema(
     {
