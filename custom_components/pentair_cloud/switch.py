@@ -101,11 +101,18 @@ class PentairRelaySwitch(SwitchEntity):
             self._logger.info(f"Turning on {self._relay_name}")
         
         # For heater, ensure pump is running
-        if self._relay_name == "heater" and not self._device.pump_running:
+        if self._relay_name == "heater":
             if DEBUG_INFO:
                 self._logger.info(
-                    "Heater requested but pump is off - starting pump at medium speed"
+                    f"Heater switch activated. Pump running: {self._device.pump_running}, "
+                    f"Active pump program: {self._device.active_pump_program}"
                 )
+            
+            if not self._device.pump_running:
+                if DEBUG_INFO:
+                    self._logger.info(
+                        "Heater requested but pump is off - starting pump at medium speed"
+                    )
             
             # Get medium speed program from config
             config_entry = self.hass.config_entries.async_get_entry(
@@ -122,6 +129,14 @@ class PentairRelaySwitch(SwitchEntity):
             
             # Wait a moment for pump to start
             await asyncio.sleep(2)
+            
+            # Force a status update to get the latest pump state
+            await self.hass.async_add_executor_job(
+                self._hub.update_pentair_devices_status
+            )
+            
+            # Wait a bit more for the update to complete
+            await asyncio.sleep(1)
         
         # Simply activate this relay's program
         program_id = self._relay_programs[self._relay_name]
