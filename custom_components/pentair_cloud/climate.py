@@ -1,6 +1,7 @@
 """Platform for pool heater climate control."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -155,9 +156,36 @@ class PentairPoolHeater(ClimateEntity, RestoreEntity):
     
     async def _async_turn_on_heater(self) -> None:
         """Turn on the pool heater."""
+        # Ensure pump is running
         if not self._device.pump_running:
-            self._logger.warning("Cannot turn on heater - pump is not running")
-            return
+            if DEBUG_INFO:
+                self._logger.info(
+                    "Heater requested but pump is off - starting pump at medium speed"
+                )
+            
+            # Get medium speed program from config
+            config_entry = self.hass.config_entries.async_get_entry(
+                list(self.hass.data[DOMAIN].keys())[0]
+            )
+            medium_speed_program = config_entry.data.get("speed_medium", 2)
+            
+            # Turn on pump at medium speed
+            await self.hass.async_add_executor_job(
+                self._hub.activate_program_concurrent,
+                self._device.pentair_device_id,
+                medium_speed_program
+            )
+            
+            # Wait a moment for pump to start
+            await asyncio.sleep(2)
+            
+            # Force a status update to get the latest pump state
+            await self.hass.async_add_executor_job(
+                self._hub.update_pentair_devices_status
+            )
+            
+            # Wait a bit more for the update to complete
+            await asyncio.sleep(1)
             
         await self.hass.async_add_executor_job(
             self._hub.activate_program_concurrent,
