@@ -37,19 +37,13 @@ async def async_setup_entry(
     }
     
     entities = []
-    existing_ids = set()
     
     for device in devices:
         # Only create heater switch (lights are handled as light entity)
-        entity = PentairRelaySwitch(_LOGGER, hub, device, "heater", 2, relay_programs)
-        if entity.unique_id not in existing_ids:
-            entities.append(entity)
-            existing_ids.add(entity.unique_id)
-        else:
-            _LOGGER.warning(f"Skipping duplicate relay switch: {entity.unique_id}")
+        entities.append(PentairRelaySwitch(_LOGGER, hub, device, "heater", 2, relay_programs))
     
     _LOGGER.info(f"Setting up {len(entities)} switch entities")
-    async_add_entities(entities)
+    async_add_entities(entities, update_before_add=True)
 
 
 class PentairRelaySwitch(SwitchEntity):

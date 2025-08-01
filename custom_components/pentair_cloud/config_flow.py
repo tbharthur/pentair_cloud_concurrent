@@ -12,7 +12,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import selector
-from .pentaircloud_modified import PentairCloudHub, PentairDevice
 
 from .const import DOMAIN
 
@@ -45,6 +44,9 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
 
     Data has the keys from STEP_USER_DATA_SCHEMA with values provided by the user.
     """
+    # Import here to avoid blocking the event loop
+    from .pentaircloud_modified import PentairCloudHub
+    
     # TODO validate the data can be used to set up a connection.
 
     # If your PyPI package is not built with async, pass your methods
@@ -94,6 +96,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             info = await validate_input(self.hass, user_input)
             # Store credentials and hub for next step
             self._data = user_input
+            from .pentaircloud_modified import PentairCloudHub
             self._hub = PentairCloudHub(_LOGGER)
             await self.hass.async_add_executor_job(
                 self._hub.authenticate, user_input["username"], user_input["password"]
@@ -225,6 +228,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             return self.async_create_entry(title="", data={})
 
         # Get hub and devices to show program names
+        from .pentaircloud_modified import PentairCloudHub
         hub = PentairCloudHub(_LOGGER)
         await self.hass.async_add_executor_job(
             hub.authenticate, 

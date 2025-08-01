@@ -42,19 +42,13 @@ async def async_setup_entry(
     }
     
     entities = []
-    existing_ids = set()
     
     for device in devices:
         # Create pump speed control for each device
-        entity = PentairPumpSpeed(_LOGGER, hub, device, speed_programs)
-        if entity.unique_id not in existing_ids:
-            entities.append(entity)
-            existing_ids.add(entity.unique_id)
-        else:
-            _LOGGER.warning(f"Skipping duplicate pump speed control: {entity.unique_id}")
+        entities.append(PentairPumpSpeed(_LOGGER, hub, device, speed_programs))
     
     _LOGGER.info(f"Setting up {len(entities)} number entities")
-    async_add_entities(entities)
+    async_add_entities(entities, update_before_add=True)
 
 
 class PentairPumpSpeed(NumberEntity):

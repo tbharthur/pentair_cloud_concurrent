@@ -29,28 +29,17 @@ async def async_setup_entry(
     lights_program = config_entry.data.get("relay_lights", 5)
     
     entities = []
-    existing_ids = set()
     
     for device in devices:
         # Add program entities (hidden by default for diagnostics)
         for program in device.programs:
-            entity = PentairProgramLight(_LOGGER, hub, device, program)
-            if entity.unique_id not in existing_ids:
-                entities.append(entity)
-                existing_ids.add(entity.unique_id)
-            else:
-                _LOGGER.warning(f"Skipping duplicate program light: {entity.unique_id}")
+            entities.append(PentairProgramLight(_LOGGER, hub, device, program))
             
         # Create light entity for pool lights
-        entity = PentairRelayLight(_LOGGER, hub, device, lights_program)
-        if entity.unique_id not in existing_ids:
-            entities.append(entity)
-            existing_ids.add(entity.unique_id)
-        else:
-            _LOGGER.warning(f"Skipping duplicate relay light: {entity.unique_id}")
+        entities.append(PentairRelayLight(_LOGGER, hub, device, lights_program))
     
     _LOGGER.info(f"Setting up {len(entities)} light entities")
-    async_add_entities(entities)
+    async_add_entities(entities, update_before_add=True)
 
 
 class PentairProgramLight(LightEntity):
