@@ -14,8 +14,10 @@ from homeassistant.components.light import (
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.helpers.entity import EntityCategory
+from homeassistant.helpers.entity_registry import RegistryEntryDisabler
 from .const import DOMAIN, DEBUG_INFO
-from .pentaircloud import PentairCloudHub, PentairDevice, PentairPumpProgram
+from .pentaircloud_modified import PentairCloudHub, PentairDevice, PentairPumpProgram
 from logging import Logger
 
 _LOGGER = logging.getLogger(__name__)
@@ -50,15 +52,10 @@ class PentairCloudLight(LightEntity):
         self.hub = hub
         self.pentair_device = pentair_device
         self.pentair_program = pentair_program
-        self._name = (
-            "Pentair "
-            + self.pentair_device.nickname
-            + " - P"
-            + str(self.pentair_program.id)
-            + " / "
-            + self.pentair_program.name
-        )
+        self._name = f"{self.pentair_device.nickname} - {self.pentair_program.name} (Program)"
         self._state = self.pentair_program.running
+        # Mark as diagnostic entity to hide by default
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
         if DEBUG_INFO:
             self.LOGGER.info("Pentair Cloud Pump " + self._name + " Configured")
 

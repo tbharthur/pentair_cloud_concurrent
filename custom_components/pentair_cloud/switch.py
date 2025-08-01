@@ -63,7 +63,9 @@ class PentairRelaySwitch(SwitchEntity):
         self._relay_name = relay_name
         self._relay_number = relay_number
         self._relay_programs = relay_programs
-        self._attr_name = f"Pentair {device.nickname} {relay_name.title()}"
+        # Cleaner naming
+        relay_display_name = "Light" if relay_name == "lights" else relay_name.title()
+        self._attr_name = f"{device.nickname} {relay_display_name}"
         self._attr_unique_id = f"pentair_{device.pentair_device_id}_relay_{relay_name}"
         self._is_on = False
         

@@ -71,7 +71,7 @@ class PentairPumpSpeed(NumberEntity):
         self._hub = hub
         self._device = device
         self._speed_programs = speed_programs
-        self._attr_name = f"Pentair {device.nickname} Pump Speed"
+        self._attr_name = f"{device.nickname} Speed Control"
         self._attr_unique_id = f"pentair_{device.pentair_device_id}_pump_speed"
         self._current_speed = 0
         

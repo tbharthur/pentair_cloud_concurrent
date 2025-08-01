@@ -15,7 +15,7 @@ from .pentaircloud_modified import PentairCloudHub
 
 from .const import DOMAIN
 
-# Add number and switch platforms
+# Add number and switch platforms, plus light for backward compatibility
 PLATFORMS: list[Platform] = [Platform.LIGHT, Platform.NUMBER, Platform.SWITCH]
 
 CONFIG_SCHEMA = vol.Schema(

@@ -55,20 +55,23 @@ During setup, you'll be able to select which programs control each function from
 
 After installation and configuration, you'll have these entities:
 
-### Pump Speed Control
-- `number.pentair_[device_id]_pump_speed` - Slider from 0-100%
-  - 0% = Pump off
-  - 30% = Low speed (Program 3)
-  - 50% = Medium speed (Program 2)
-  - 75% = High speed (Program 4)
-  - 100% = Max speed (Program 1)
+### Primary Controls (Use These!)
 
-### Relay Switches
-- `switch.pentair_[device_id]_relay_lights` - Pool lights on/off
-- `switch.pentair_[device_id]_relay_heater` - Pool heater on/off
+#### Pump Speed Control
+- **Entity**: `number.[device_name]_speed_control`
+- **Name**: "[Device Name] Speed Control"
+- **Control**: 0-100% slider (0 = off)
 
-### Legacy Program Entities
-- `light.pentair_[device_id]_p[1-8]` - Individual program controls (for backward compatibility)
+#### Relay Switches
+- **Light Entity**: `switch.[device_name]_light`
+- **Light Name**: "[Device Name] Light"
+- **Heater Entity**: `switch.[device_name]_heater`
+- **Heater Name**: "[Device Name] Heater"
+
+### Program Entities (Hidden by Default)
+- `light.[device_name]_[program_name]_program` - Individual program controls
+- These are marked as diagnostic entities and hidden by default
+- Only use if you need direct program control for automation
 
 ## Example Automations
 
