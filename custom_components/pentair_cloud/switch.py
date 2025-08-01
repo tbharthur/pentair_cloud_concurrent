@@ -14,11 +14,10 @@ from .pentaircloud_modified import PentairCloudHub, PentairDevice
 
 _LOGGER = logging.getLogger(__name__)
 
-# Relay program mappings - customize based on your setup
-RELAY_PROGRAMS = {
-    "lights": 5,   # Program 5 for lights only
-    "heater": 6,   # Program 6 for heater only
-    "both": 7,     # Program 7 for both relays
+# Default relay program mappings - will be overridden by config
+DEFAULT_RELAY_PROGRAMS = {
+    "lights": 5,   # Program for lights
+    "heater": 6,   # Program for heater
 }
 
 async def async_setup_entry(
@@ -30,11 +29,17 @@ async def async_setup_entry(
     hub = hass.data[DOMAIN][config_entry.entry_id]["pentair_cloud_hub"]
     devices: list[PentairDevice] = await hass.async_add_executor_job(hub.get_devices)
     
+    # Get relay program mappings from config
+    relay_programs = {
+        "lights": config_entry.data.get("relay_lights", 5),
+        "heater": config_entry.data.get("relay_heater", 6),
+    }
+    
     entities = []
     for device in devices:
         # Create switches for each relay
-        entities.append(PentairRelaySwitch(_LOGGER, hub, device, "lights", 1))
-        entities.append(PentairRelaySwitch(_LOGGER, hub, device, "heater", 2))
+        entities.append(PentairRelaySwitch(_LOGGER, hub, device, "lights", 1, relay_programs))
+        entities.append(PentairRelaySwitch(_LOGGER, hub, device, "heater", 2, relay_programs))
     
     async_add_entities(entities)
 
@@ -49,6 +54,7 @@ class PentairRelaySwitch(SwitchEntity):
         device: PentairDevice,
         relay_name: str,
         relay_number: int,
+        relay_programs: dict[str, int],
     ) -> None:
         """Initialize the relay switch."""
         self._logger = logger
@@ -56,6 +62,7 @@ class PentairRelaySwitch(SwitchEntity):
         self._device = device
         self._relay_name = relay_name
         self._relay_number = relay_number
+        self._relay_programs = relay_programs
         self._attr_name = f"Pentair {device.nickname} {relay_name.title()}"
         self._attr_unique_id = f"pentair_{device.pentair_device_id}_relay_{relay_name}"
         self._is_on = False
@@ -96,15 +103,8 @@ class PentairRelaySwitch(SwitchEntity):
             )
             return
         
-        # Get current relay states to determine which program to activate
-        other_relay_on = self._device.get_other_relay_state(self._relay_number)
-        
-        if other_relay_on:
-            # Both relays should be on
-            program_id = RELAY_PROGRAMS["both"]
-        else:
-            # Just this relay
-            program_id = RELAY_PROGRAMS[self._relay_name]
+        # Simply activate this relay's program
+        program_id = self._relay_programs[self._relay_name]
         
         await self.hass.async_add_executor_job(
             self._hub.activate_program_concurrent,
@@ -119,28 +119,14 @@ class PentairRelaySwitch(SwitchEntity):
         if DEBUG_INFO:
             self._logger.info(f"Turning off {self._relay_name}")
         
-        # Get current relay states
-        other_relay_on = self._device.get_other_relay_state(self._relay_number)
+        # Simply deactivate this relay's program
+        program_id = self._relay_programs[self._relay_name]
         
-        if other_relay_on:
-            # Keep the other relay on
-            other_relay_name = "heater" if self._relay_name == "lights" else "lights"
-            program_id = RELAY_PROGRAMS[other_relay_name]
-            
-            await self.hass.async_add_executor_job(
-                self._hub.activate_program_concurrent,
-                self._device.pentair_device_id,
-                program_id
-            )
-        else:
-            # Both relays will be off - deactivate relay programs
-            for prog_name in ["lights", "heater", "both"]:
-                prog_id = RELAY_PROGRAMS[prog_name]
-                await self.hass.async_add_executor_job(
-                    self._hub.deactivate_program,
-                    self._device.pentair_device_id,
-                    prog_id
-                )
+        await self.hass.async_add_executor_job(
+            self._hub.deactivate_program,
+            self._device.pentair_device_id,
+            program_id
+        )
         
         self._is_on = False
     

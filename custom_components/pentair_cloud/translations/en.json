@@ -1,7 +1,8 @@
 {
     "config": {
         "abort": {
-            "already_configured": "Device is already configured"
+            "already_configured": "Device is already configured",
+            "no_devices": "No devices found"
         },
         "error": {
             "cannot_connect": "Failed to connect",
@@ -13,7 +14,36 @@
                 "data": {
                     "password": "Password",
                     "username": "Username"
-                }
+                },
+                "description": "Enter your Pentair Home app credentials"
+            },
+            "programs": {
+                "data": {
+                    "speed_low": "Low Speed (30%)",
+                    "speed_medium": "Medium Speed (50%)",
+                    "speed_high": "High Speed (75%)",
+                    "speed_max": "Maximum Speed (100%)",
+                    "relay_lights": "Pool Lights Control",
+                    "relay_heater": "Pool Heater Control"
+                },
+                "description": "Select which programs control each function. Programs can be activated concurrently.",
+                "title": "Program Configuration"
+            }
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "data": {
+                    "speed_low": "Low Speed (30%)",
+                    "speed_medium": "Medium Speed (50%)",
+                    "speed_high": "High Speed (75%)",
+                    "speed_max": "Maximum Speed (100%)",
+                    "relay_lights": "Pool Lights Control",
+                    "relay_heater": "Pool Heater Control"
+                },
+                "description": "Update which programs control each function",
+                "title": "Program Configuration"
             }
         }
     }

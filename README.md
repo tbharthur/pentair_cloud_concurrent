@@ -43,17 +43,13 @@ Setting up a custom repository is done by:
 For this integration to work properly, you need to configure your Pentair programs as follows:
 
 **Speed Programs** (configure these with your desired speeds):
-- Program 1: 100% speed (e.g., "Quick Clean")
-- Program 2: 50% speed (e.g., "Regular")
-- Program 3: 30% speed (e.g., "Low Speed")
-- Program 4: 75% speed (e.g., "High Speed")
+- 4 programs with different pump speeds (e.g., 30%, 50%, 75%, 100%)
 
 **Relay Control Programs** (configure these with appropriate relay settings):
-- Program 5: Lights only (Relay 1 ON, Relay 2 OFF)
-- Program 6: Heater only (Relay 1 OFF, Relay 2 ON)
-- Program 7: Both relays (Relay 1 ON, Relay 2 ON)
+- 1 program for Lights (Relay 1 ON, Relay 2 OFF)
+- 1 program for Heater (Relay 1 OFF, Relay 2 ON)
 
-You can customize these mappings by editing the constants in `number.py` and `switch.py`.
+During setup, you'll be able to select which programs control each function from a dropdown list showing your actual program names. You can also update these selections later in the integration options.
 
 ## Usage
 
@@ -112,5 +108,6 @@ This integration leverages the ability to have multiple Pentair programs active 
 - One program controls the pump motor speed (tracked by field s14)
 - Other programs can control relays independently (tracked by fields s30/s31)
 - Programs use the e10 field with value 3 to indicate active control
+- Both relay programs can be active at the same time, eliminating the need for a "both relays" program
 
 This approach provides granular control over pump speed and relay states that isn't possible through the standard Pentair app interface.

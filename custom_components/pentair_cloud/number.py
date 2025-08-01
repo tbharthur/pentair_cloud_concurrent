@@ -14,13 +14,13 @@ from .pentaircloud_modified import PentairCloudHub, PentairDevice
 
 _LOGGER = logging.getLogger(__name__)
 
-# Speed mappings - customize these based on your programs
-SPEED_PROGRAMS = {
+# Default speed mappings - will be overridden by config
+DEFAULT_SPEED_PROGRAMS = {
     0: None,      # Off
-    30: 3,        # Low speed - Program 3
-    50: 2,        # Medium speed - Program 2
-    75: 4,        # High speed - Program 4
-    100: 1        # Max speed - Program 1
+    30: 3,        # Low speed
+    50: 2,        # Medium speed
+    75: 4,        # High speed
+    100: 1        # Max speed
 }
 
 async def async_setup_entry(
@@ -32,10 +32,19 @@ async def async_setup_entry(
     hub = hass.data[DOMAIN][config_entry.entry_id]["pentair_cloud_hub"]
     devices: list[PentairDevice] = await hass.async_add_executor_job(hub.get_devices)
     
+    # Get program mappings from config
+    speed_programs = {
+        0: None,
+        30: config_entry.data.get("speed_low", 3),
+        50: config_entry.data.get("speed_medium", 2),
+        75: config_entry.data.get("speed_high", 4),
+        100: config_entry.data.get("speed_max", 1)
+    }
+    
     entities = []
     for device in devices:
         # Create pump speed control for each device
-        entities.append(PentairPumpSpeed(_LOGGER, hub, device))
+        entities.append(PentairPumpSpeed(_LOGGER, hub, device, speed_programs))
     
     async_add_entities(entities)
 
@@ -55,11 +64,13 @@ class PentairPumpSpeed(NumberEntity):
         logger: logging.Logger,
         hub: PentairCloudHub,
         device: PentairDevice,
+        speed_programs: dict[int, int],
     ) -> None:
         """Initialize the pump speed control."""
         self._logger = logger
         self._hub = hub
         self._device = device
+        self._speed_programs = speed_programs
         self._attr_name = f"Pentair {device.nickname} Pump Speed"
         self._attr_unique_id = f"pentair_{device.pentair_device_id}_pump_speed"
         self._current_speed = 0
@@ -96,9 +107,9 @@ class PentairPumpSpeed(NumberEntity):
             self._current_speed = 0
         else:
             # Find closest speed program
-            speeds = list(SPEED_PROGRAMS.keys())
+            speeds = list(self._speed_programs.keys())
             closest_speed = min(speeds, key=lambda x: abs(x - value))
-            program_id = SPEED_PROGRAMS[closest_speed]
+            program_id = self._speed_programs[closest_speed]
             
             if program_id:
                 # Activate the speed program
@@ -122,7 +133,7 @@ class PentairPumpSpeed(NumberEntity):
         active_program = self._device.active_pump_program
         if active_program:
             # Find speed for this program
-            for speed, prog_id in SPEED_PROGRAMS.items():
+            for speed, prog_id in self._speed_programs.items():
                 if prog_id == active_program:
                     self._current_speed = speed
                     break
