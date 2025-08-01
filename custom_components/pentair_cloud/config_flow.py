@@ -11,6 +11,7 @@ from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import selector
 from .pentaircloud_modified import PentairCloudHub, PentairDevice
 
 from .const import DOMAIN
@@ -170,6 +171,12 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required("speed_max", default=program_names[0]): vol.In(program_names),
                 vol.Required("relay_lights", default=program_names[4] if len(program_names) > 4 else program_names[0]): vol.In(program_names),
                 vol.Required("relay_heater", default=program_names[5] if len(program_names) > 5 else program_names[0]): vol.In(program_names),
+                vol.Optional("temperature_sensor"): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain="sensor",
+                        device_class="temperature"
+                    )
+                ),
             }
         )
 
@@ -260,6 +267,15 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     "relay_heater", 
                     default=reverse_map.get(current_data.get("relay_heater", 6), program_names[0])
                 ): vol.In(program_names),
+                vol.Optional(
+                    "temperature_sensor",
+                    default=current_data.get("temperature_sensor")
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain="sensor",
+                        device_class="temperature"
+                    )
+                ),
             }
         )
         

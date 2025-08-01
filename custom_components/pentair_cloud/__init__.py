@@ -15,8 +15,8 @@ from .pentaircloud_modified import PentairCloudHub
 
 from .const import DOMAIN
 
-# Add number and switch platforms, plus light for backward compatibility
-PLATFORMS: list[Platform] = [Platform.LIGHT, Platform.NUMBER, Platform.SWITCH]
+# Add all platforms
+PLATFORMS: list[Platform] = [Platform.LIGHT, Platform.NUMBER, Platform.SWITCH, Platform.CLIMATE]
 
 CONFIG_SCHEMA = vol.Schema(
     {
@@ -69,7 +69,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             f"Exception while setting up Pentair Cloud. Will retry. {err}"
         )
 
-    hass.data[DOMAIN][entry.entry_id] = {"pentair_cloud_hub": hub}
+    hass.data[DOMAIN][entry.entry_id] = {
+        "pentair_cloud_hub": hub,
+        "has_pool_light": True  # Flag to determine if we should create light entity
+    }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 

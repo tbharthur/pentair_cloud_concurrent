@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from homeassistant.components.switch import SwitchEntity
+from homeassistant.components.switch import SwitchEntity, SwitchDeviceClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -37,8 +37,7 @@ async def async_setup_entry(
     
     entities = []
     for device in devices:
-        # Create switches for each relay
-        entities.append(PentairRelaySwitch(_LOGGER, hub, device, "lights", 1, relay_programs))
+        # Only create heater switch (lights are handled as light entity)
         entities.append(PentairRelaySwitch(_LOGGER, hub, device, "heater", 2, relay_programs))
     
     async_add_entities(entities)
@@ -69,11 +68,13 @@ class PentairRelaySwitch(SwitchEntity):
         self._attr_unique_id = f"pentair_{device.pentair_device_id}_relay_{relay_name}"
         self._is_on = False
         
-        # Set icon based on relay type
+        # Set icon and device class based on relay type
         if relay_name == "lights":
             self._attr_icon = "mdi:lightbulb"
+            # No specific device class for pool lights, but the icon helps
         elif relay_name == "heater":
             self._attr_icon = "mdi:fire"
+            # No specific device class for pool heater switch
     
     @property
     def device_info(self):

@@ -30,11 +30,20 @@ async def async_setup_entry(
 ):
     hub = hass.data[DOMAIN][config_entry.entry_id]["pentair_cloud_hub"]
     devices: list[PentairDevice] = await hass.async_add_executor_job(hub.get_devices)
-    cloud_devices = []
+    
+    entities = []
+    
+    # Add program entities (hidden by default)
     for device in devices:
         for program in device.programs:
-            cloud_devices.append(PentairCloudLight(_LOGGER, hub, device, program))
-    async_add_entities(cloud_devices)
+            entities.append(PentairCloudLight(_LOGGER, hub, device, program))
+    
+    # Add pool light entity
+    lights_program = config_entry.data.get("relay_lights", 5)
+    for device in devices:
+        entities.append(PentairPoolLight(_LOGGER, hub, device, lights_program))
+    
+    async_add_entities(entities)
 
 
 class PentairCloudLight(LightEntity):
@@ -139,4 +148,92 @@ class PentairCloudLight(LightEntity):
                 "Pentair Cloud Pump "
                 + self.pentair_device.pentair_device_id
                 + " Called UPDATE"
+            )
+
+
+class PentairPoolLight(LightEntity):
+    """Representation of a Pentair pool light controlled via relay."""
+    
+    _attr_icon = "mdi:lightbulb"
+    
+    def __init__(
+        self,
+        logger: Logger,
+        hub: PentairCloudHub,
+        device: PentairDevice,
+        lights_program: int,
+    ) -> None:
+        """Initialize the pool light."""
+        self._logger = logger
+        self._hub = hub
+        self._device = device
+        self._lights_program = lights_program
+        self._attr_name = f"{device.nickname} Light"
+        self._attr_unique_id = f"pentair_{device.pentair_device_id}_pool_light"
+        self._is_on = False
+    
+    @property
+    def device_info(self):
+        """Return device info."""
+        return {
+            "identifiers": {
+                (DOMAIN, f"pentair_{self._device.pentair_device_id}")
+            },
+            "name": self._device.nickname,
+            "model": self._device.nickname,
+            "sw_version": "1.0",
+            "manufacturer": "Pentair",
+        }
+    
+    @property
+    def is_on(self) -> bool:
+        """Return true if the light is on."""
+        return self._is_on
+    
+    def turn_on(self, **kwargs) -> None:
+        """Turn on the light."""
+        if DEBUG_INFO:
+            self._logger.info(f"Turning on pool lights")
+        
+        # Check if pump is running
+        if not self._device.pump_running:
+            self._logger.warning(
+                "Cannot turn on lights - pump is not running"
+            )
+            return
+        
+        # Activate lights program
+        self._hub.activate_program_concurrent(
+            self._device.pentair_device_id,
+            self._lights_program
+        )
+        
+        self._is_on = True
+    
+    def turn_off(self, **kwargs) -> None:
+        """Turn off the light."""
+        if DEBUG_INFO:
+            self._logger.info(f"Turning off pool lights")
+        
+        # Deactivate lights program
+        self._hub.deactivate_program(
+            self._device.pentair_device_id,
+            self._lights_program
+        )
+        
+        self._is_on = False
+    
+    def update(self) -> None:
+        """Update the light state."""
+        self._hub.update_pentair_devices_status()
+        
+        # Check if lights program is active
+        for program in self._device.programs:
+            if program.id == self._lights_program:
+                self._is_on = program.running  # This checks e10 = 3
+                break
+        
+        if DEBUG_INFO:
+            self._logger.info(
+                f"Pool lights program {self._lights_program} is {'active' if self._is_on else 'inactive'}"
             )

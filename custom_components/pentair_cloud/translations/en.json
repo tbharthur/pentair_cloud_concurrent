@@ -24,9 +24,10 @@
                     "speed_high": "High Speed (75%)",
                     "speed_max": "Maximum Speed (100%)",
                     "relay_lights": "Pool Lights Control",
-                    "relay_heater": "Pool Heater Control"
+                    "relay_heater": "Pool Heater Control",
+                    "temperature_sensor": "Pool Temperature Sensor (optional)"
                 },
-                "description": "Select which programs control each function. Programs can be activated concurrently.",
+                "description": "Select which programs control each function. If you select a temperature sensor, a thermostat will be created for the pool heater.",
                 "title": "Program Configuration"
             }
         }
@@ -40,9 +41,10 @@
                     "speed_high": "High Speed (75%)",
                     "speed_max": "Maximum Speed (100%)",
                     "relay_lights": "Pool Lights Control",
-                    "relay_heater": "Pool Heater Control"
+                    "relay_heater": "Pool Heater Control",
+                    "temperature_sensor": "Pool Temperature Sensor (optional)"
                 },
-                "description": "Update which programs control each function",
+                "description": "Update which programs control each function. If you select a temperature sensor, a thermostat will be created.",
                 "title": "Program Configuration"
             }
         }

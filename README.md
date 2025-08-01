@@ -3,7 +3,8 @@ Homeassistant Pentair cloud custom integration with enhanced concurrent program 
 
 Supports the Pentair IntelliFlo 3 VS Pump with the Wifi module. This integration provides:
 - **Pump Speed Control** - A 0-100% slider that maps to your configured pump speed programs
-- **Individual Relay Switches** - Separate switches for pool lights and heater
+- **Individual Relay Control** - Pool lights as light entity, heater as switch
+- **Automatic Climate Entity** - Optional thermostat creation with temperature sensor
 - **Legacy Program Support** - Virtual "Light" entities for each program (backward compatibility)
 - **Concurrent Program Activation** - Run pump speed and relay programs simultaneously
 
@@ -49,7 +50,10 @@ For this integration to work properly, you need to configure your Pentair progra
 - 1 program for Lights (Relay 1 ON, Relay 2 OFF)
 - 1 program for Heater (Relay 1 OFF, Relay 2 ON)
 
-During setup, you'll be able to select which programs control each function from a dropdown list showing your actual program names. You can also update these selections later in the integration options.
+During setup, you'll be able to:
+- Select which programs control each function from dropdown lists
+- Optionally select a temperature sensor for automatic pool heater thermostat creation
+- Update these selections later in the integration options
 
 ## Usage
 
@@ -62,11 +66,20 @@ After installation and configuration, you'll have these entities:
 - **Name**: "[Device Name] Speed Control"
 - **Control**: 0-100% slider (0 = off)
 
-#### Relay Switches
-- **Light Entity**: `switch.[device_name]_light`
-- **Light Name**: "[Device Name] Light"
-- **Heater Entity**: `switch.[device_name]_heater`
-- **Heater Name**: "[Device Name] Heater"
+#### Pool Light
+- **Entity**: `light.[device_name]_light`
+- **Name**: "[Device Name] Light"
+- **Type**: Light entity with on/off control
+
+#### Pool Heater Switch
+- **Entity**: `switch.[device_name]_heater`
+- **Name**: "[Device Name] Heater"
+- **Type**: Switch entity for manual control
+
+#### Pool Heater Thermostat (if temperature sensor selected)
+- **Entity**: `climate.[device_name]_pool_heater`
+- **Name**: "[Device Name] Pool Heater"
+- **Type**: Climate entity with temperature control (60-104°F)
 
 ### Program Entities (Hidden by Default)
 - `light.[device_name]_[program_name]_program` - Individual program controls
