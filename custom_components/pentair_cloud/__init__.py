@@ -70,8 +70,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
 
     hass.data[DOMAIN][entry.entry_id] = {
-        "pentair_cloud_hub": hub,
-        "has_pool_light": True  # Flag to determine if we should create light entity
+        "pentair_cloud_hub": hub
     }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

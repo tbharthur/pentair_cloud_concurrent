@@ -9,6 +9,7 @@ from homeassistant.components.light import (
     ATTR_BRIGHTNESS,
     PLATFORM_SCHEMA,
     LightEntity,
+    ColorMode,
 )
 
 from homeassistant.core import HomeAssistant
@@ -49,6 +50,9 @@ async def async_setup_entry(
 class PentairCloudLight(LightEntity):
     global DOMAIN
     global DEBUG_INFO
+    
+    _attr_color_mode = ColorMode.ONOFF
+    _attr_supported_color_modes = {ColorMode.ONOFF}
 
     def __init__(
         self,
@@ -155,6 +159,8 @@ class PentairPoolLight(LightEntity):
     """Representation of a Pentair pool light controlled via relay."""
     
     _attr_icon = "mdi:lightbulb"
+    _attr_color_mode = ColorMode.ONOFF
+    _attr_supported_color_modes = {ColorMode.ONOFF}
     
     def __init__(
         self,
@@ -195,20 +201,30 @@ class PentairPoolLight(LightEntity):
         if DEBUG_INFO:
             self._logger.info(f"Turning on pool lights")
         
+        # Update device status first
+        self._hub.update_pentair_devices_status()
+        
         # Check if pump is running
         if not self._device.pump_running:
             self._logger.warning(
-                "Cannot turn on lights - pump is not running"
+                f"Cannot turn on lights - pump is not running (active program: {self._device.active_pump_program})"
             )
-            return
+            # Try to activate anyway for testing
+            # return
         
         # Activate lights program
+        if DEBUG_INFO:
+            self._logger.info(f"Activating lights program {self._lights_program} on device {self._device.pentair_device_id}")
+            
         self._hub.activate_program_concurrent(
             self._device.pentair_device_id,
             self._lights_program
         )
         
         self._is_on = True
+        
+        if DEBUG_INFO:
+            self._logger.info(f"Light activation complete")
     
     def turn_off(self, **kwargs) -> None:
         """Turn off the light."""
