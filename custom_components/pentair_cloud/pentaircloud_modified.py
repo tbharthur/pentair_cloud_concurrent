@@ -362,43 +362,26 @@ class PentairCloudHub:
                 "Exception while activating program (Empty token)."
             )
 
-    def deactivate_program(self, deviceId: str, program_id: int, disable: bool = False) -> None:
+    def deactivate_program(self, deviceId: str, program_id: int) -> None:
         """Deactivate a specific program.
         
-        Args:
-            deviceId: The device ID
-            program_id: The program ID to deactivate
-            disable: If True, disables the program (e10=0). If False, just stops it if manual (e10=1)
+        Since we only use manual programs now:
+        - Pump speed programs (1-4): use e10=1 to stop without disabling
+        - Relay programs (5-8): use e10=0 to fully turn off
         """
         if DEBUG_INFO:
             self.LOGGER.info(
-                f"Pentair Cloud - Deactivating program {program_id} on device {deviceId} (disable={disable})"
+                f"Pentair Cloud - Deactivating program {program_id} on device {deviceId}"
             )
         
         self.populate_AWS_token()
         if self.AWS_TOKEN is not None:
             try:
-                # Find the program to check its type
-                program_type = None
-                for device in self.devices:
-                    if device.pentair_device_id == deviceId:
-                        for program in device.programs:
-                            if program.id == program_id:
-                                program_type = program.program_type
-                                if DEBUG_INFO:
-                                    self.LOGGER.info(
-                                        f"Program {program_id} ({program.name}) has type {program_type} "
-                                        f"(0=Schedule, 1=Interval, 2=Manual)"
-                                    )
-                                break
-                
                 endpoint = PENTAIR_ENDPOINT + PENTAIR_DEVICE_SERVICE_PATH + deviceId
                 field_name = f"zp{program_id}e10"
                 
-                # For pump speed programs (1-4) that are manual (type 2), use e10=1 to stop without disabling
-                # For relay programs (5-8) or scheduled programs, always use e10=0 to fully deactivate
-                # This ensures relays turn off completely while pump programs stay enabled
-                if not disable and program_type == 2 and program_id <= 4:
+                # Pump programs (1-4) stop but stay enabled, relay programs (5-8) turn off completely
+                if program_id <= 4:
                     payload = {"payload": {field_name: "1"}}
                 else:
                     payload = {"payload": {field_name: "0"}}
@@ -423,11 +406,7 @@ class PentairCloudHub:
                         for program in device.programs:
                             if program.id == program_id:
                                 program.running = False
-                                # Update control value based on what we sent
-                                if not disable and program_type == 2 and program_id <= 4:
-                                    program.control_value = 1
-                                else:
-                                    program.control_value = 0
+                                program.control_value = 1 if program_id <= 4 else 0
                 
             except Exception as err:
                 self.LOGGER.error(
