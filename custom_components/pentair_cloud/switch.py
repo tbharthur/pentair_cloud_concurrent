@@ -1,6 +1,7 @@
 """Platform for switch integration (relay control)."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -99,12 +100,28 @@ class PentairRelaySwitch(SwitchEntity):
         if DEBUG_INFO:
             self._logger.info(f"Turning on {self._relay_name}")
         
-        # Check if pump is running
-        if not self._device.pump_running:
-            self._logger.warning(
-                f"Cannot turn on {self._relay_name} - pump is not running"
+        # For heater, ensure pump is running
+        if self._relay_name == "heater" and not self._device.pump_running:
+            if DEBUG_INFO:
+                self._logger.info(
+                    "Heater requested but pump is off - starting pump at medium speed"
+                )
+            
+            # Get medium speed program from config
+            config_entry = self.hass.config_entries.async_get_entry(
+                list(self.hass.data[DOMAIN].keys())[0]
             )
-            return
+            medium_speed_program = config_entry.data.get("speed_medium", 2)
+            
+            # Turn on pump at medium speed
+            await self.hass.async_add_executor_job(
+                self._hub.activate_program_concurrent,
+                self._device.pentair_device_id,
+                medium_speed_program
+            )
+            
+            # Wait a moment for pump to start
+            await asyncio.sleep(2)
         
         # Simply activate this relay's program
         program_id = self._relay_programs[self._relay_name]

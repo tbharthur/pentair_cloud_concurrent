@@ -204,14 +204,6 @@ class PentairPoolLight(LightEntity):
         # Update device status first
         self._hub.update_pentair_devices_status()
         
-        # Check if pump is running
-        if not self._device.pump_running:
-            self._logger.warning(
-                f"Cannot turn on lights - pump is not running (active program: {self._device.active_pump_program})"
-            )
-            # Try to activate anyway for testing
-            # return
-        
         # Activate lights program
         if DEBUG_INFO:
             self._logger.info(f"Activating lights program {self._lights_program} on device {self._device.pentair_device_id}")
