@@ -102,14 +102,16 @@ class PentairPumpSpeed(NumberEntity):
         
         # Convert speed to program
         if value == 0:
-            # Stop only pump programs (1-4), not relay programs
-            for speed_value, program_id in self._speed_programs.items():
-                if program_id and speed_value > 0:  # Skip None and 0 speed
-                    await self.hass.async_add_executor_job(
-                        self._hub.deactivate_program,
-                        self._device.pentair_device_id,
-                        program_id
-                    )
+            # Only stop the currently active pump program
+            active_program = self._device.active_pump_program
+            if active_program:
+                if DEBUG_INFO:
+                    self._logger.info(f"Deactivating active pump program {active_program}")
+                await self.hass.async_add_executor_job(
+                    self._hub.deactivate_program,
+                    self._device.pentair_device_id,
+                    active_program
+                )
             self._current_speed = 0
         else:
             # Find closest speed program
