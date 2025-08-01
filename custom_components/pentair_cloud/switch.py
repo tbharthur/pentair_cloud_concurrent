@@ -145,6 +145,22 @@ class PentairRelaySwitch(SwitchEntity):
             
             # Wait a bit more for the update to complete
             await asyncio.sleep(1)
+            
+            # Update pump speed entity to reflect the new speed
+            pump_speed_entity_id = f"number.{self._device.nickname.lower().replace(' ', '_')}_speed_control"
+            try:
+                # Force update of the pump speed entity
+                await self.hass.services.async_call(
+                    "homeassistant",
+                    "update_entity",
+                    {"entity_id": pump_speed_entity_id},
+                    blocking=False
+                )
+                if DEBUG_INFO:
+                    self._logger.info(f"Requested update for pump speed entity: {pump_speed_entity_id}")
+            except Exception as e:
+                if DEBUG_INFO:
+                    self._logger.warning(f"Could not update pump speed entity: {e}")
         
         # Simply activate this relay's program
         program_id = self._relay_programs[self._relay_name]
