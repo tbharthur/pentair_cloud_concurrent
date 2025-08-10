@@ -117,6 +117,19 @@ class PentairPumpFan(FanEntity):
         """Return supported features."""
         return FanEntityFeature.PRESET_MODE | FanEntityFeature.SET_SPEED
     
+    @property
+    def device_info(self):
+        """Return device info to associate with the Pool Pump device."""
+        return {
+            "identifiers": {
+                (DOMAIN, f"pentair_{self._device.pentair_device_id}")
+            },
+            "name": self._device.nickname,
+            "model": self._device.nickname,
+            "sw_version": "1.0",
+            "manufacturer": "Pentair",
+        }
+    
     def _check_heater_safety(self, requested_speed: int) -> int:
         """
         Enforce heater safety rules.
