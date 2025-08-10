@@ -15,8 +15,8 @@ from .pentaircloud_modified import PentairCloudHub
 
 from .const import DOMAIN
 
-# Add all platforms
-PLATFORMS: list[Platform] = [Platform.LIGHT, Platform.NUMBER, Platform.SWITCH, Platform.CLIMATE]
+# Add all platforms including new FAN platform for pump control
+PLATFORMS: list[Platform] = [Platform.LIGHT, Platform.FAN, Platform.NUMBER, Platform.SWITCH, Platform.CLIMATE]
 
 CONFIG_SCHEMA = vol.Schema(
     {
@@ -70,7 +70,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
 
     hass.data[DOMAIN][entry.entry_id] = {
-        "pentair_cloud_hub": hub
+        "pentair_cloud_hub": hub,  # Keep for backward compatibility
+        "hub": hub,  # New consistent key
+        "coordinator": None,  # Will be set by platforms if needed
+        "pump_fan": None  # Will be set by fan platform
     }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

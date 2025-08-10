@@ -18,8 +18,9 @@ PENTAIR_USER_PROFILE_PATH = "/user/user-service/common/profilev2"
 PENTAIR_DEVICES_PATH = "/device/device-service/user/devices"
 PENTAIR_DEVICES_2_PATH = "/device2/device2-service/user/device"
 PENTAIR_DEVICE_SERVICE_PATH = "/device/device-service/user/device/"
-UPDATE_MIN_SECONDS = 60  # Minimum time between two update requests
-PROGRAM_START_MIN_SECONDS = 30  # Minimum time between two requests to start a program
+UPDATE_MIN_SECONDS = 10  # Minimum time between two update requests - reduced from 60
+PROGRAM_START_MIN_SECONDS = 5  # Minimum time between two requests to start a program - reduced from 30
+DEBOUNCE_SECONDS = 2  # Debounce delay for rapid command changes
 
 
 class PentairPumpProgram:
@@ -318,7 +319,7 @@ class PentairCloudHub:
                     "Pentair Cloud - Update Devices Status Requested but before min time"
                 )
 
-    def start_program(self, deviceId: str, program_id: int) -> None:
+    def start_program(self, deviceId: str, program_id: int) -> bool:
         device = None
         program = None
         for device_l in self.devices:
@@ -334,7 +335,7 @@ class PentairCloudHub:
                 + " on device "
                 + deviceId
             )
-            return
+            return False
         if (
             device.last_program_start == None
             or time.time() - device.last_program_start > PROGRAM_START_MIN_SECONDS
@@ -376,22 +377,26 @@ class PentairCloudHub:
                         headers=self.get_pentair_header(),
                         data='{"payload":{"p2":"99"}}',
                     )
+                    return True  # Success
                 except Exception as err:
                     self.LOGGER.error(
                         "Exception with Pentair API (Start Program). %s",
                         err,
                     )
+                    return False
             else:
                 self.LOGGER.error(
                     "Exception while starting program (Empty token in device status)."
                 )
+                return False
         else:
             if DEBUG_INFO:
                 self.LOGGER.info(
                     "Pentair Cloud - Start program Requested but before min time"
                 )
+            return False  # Rate limited
 
-    def stop_program(self, deviceId: str, program_id: int) -> None:
+    def stop_program(self, deviceId: str, program_id: int) -> bool:
         device = None
         program = None
         for device_l in self.devices:
@@ -407,7 +412,7 @@ class PentairCloudHub:
                 + " on device "
                 + deviceId
             )
-            return
+            return False
         if DEBUG_INFO:
             self.LOGGER.info(
                 "Pentair Cloud - Stop program "
@@ -442,15 +447,18 @@ class PentairCloudHub:
                     headers=self.get_pentair_header(),
                     data='{"payload":{"p2":"' + str(program_id - 1) + '"}}',
                 )
+                return True  # Success
             except Exception as err:
                 self.LOGGER.error(
                     "Exception with Pentair API (Stop Program). %s",
                     err,
                 )
+                return False
         else:
             self.LOGGER.error(
                 "Exception while stopping program (Empty token in device status)."
             )
+            return False
 
     def authenticate(self, username: str, password: str) -> bool:
         try:

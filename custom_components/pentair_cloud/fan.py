@@ -1,0 +1,340 @@
+"""Fan platform for Pentair pump control with heater safety."""
+import logging
+from typing import Any, Optional, List
+from datetime import datetime, timedelta
+import asyncio
+import time
+
+from homeassistant.components.fan import (
+    FanEntity,
+    FanEntityFeature,
+)
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.exceptions import HomeAssistantError
+
+from .const import DOMAIN, DEBUG_INFO
+from .pentaircloud import PentairCloudHub, PentairDevice, PentairPumpProgram
+
+_LOGGER = logging.getLogger(__name__)
+
+PRESET_MODES = {
+    "off": 0,
+    "low": 30,
+    "medium": 50,
+    "high": 75,
+    "max": 100
+}
+
+SPEED_TO_PROGRAM = {
+    0: None,      # Off
+    30: 3,        # Low Speed program
+    50: 2,        # Regular program
+    75: 4,        # Service Mode program
+    100: 1        # Quick Clean program
+}
+
+PROGRAM_TO_SPEED = {v: k for k, v in SPEED_TO_PROGRAM.items() if v is not None}
+PROGRAM_TO_SPEED[None] = 0
+
+async def async_setup_entry(
+    hass: HomeAssistant,
+    config_entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Set up Pentair pump fan entities."""
+    # Try both keys for compatibility
+    hub = hass.data[DOMAIN][config_entry.entry_id].get("hub") or hass.data[DOMAIN][config_entry.entry_id].get("pentair_cloud_hub")
+    coordinator = hass.data[DOMAIN][config_entry.entry_id].get("coordinator")
+    
+    entities = []
+    for device in hub.get_devices():
+        # Create fan entity for each pump device
+        fan_entity = PentairPumpFan(hub, device, coordinator, hass)
+        entities.append(fan_entity)
+        
+        # Store reference for heater integration
+        hass.data[DOMAIN][config_entry.entry_id]["pump_fan"] = fan_entity
+        
+        _LOGGER.info(f"Created pump fan entity for {device.nickname}")
+    
+    async_add_entities(entities, True)
+
+
+class PentairPumpFan(FanEntity):
+    """Pentair pump fan entity with heater safety."""
+    
+    def __init__(self, hub: PentairCloudHub, device: PentairDevice, coordinator, hass: HomeAssistant):
+        """Initialize the fan."""
+        self._hub = hub
+        self._device = device
+        self._coordinator = coordinator
+        self.hass = hass
+        self._attr_unique_id = f"pentair_pump_{device.pentair_device_id}"
+        self._attr_name = f"{device.nickname} Pump"
+        
+        # State tracking
+        self._attr_is_on = False
+        self._attr_percentage = 0
+        self._attr_preset_mode = "off"
+        
+        # Debounce tracking
+        self._pending_speed_change = None
+        self._last_speed_change = time.time()
+        self._speed_change_task = None
+        
+        # Heater safety tracking
+        self._heater_on = False
+        self._minimum_speed_override = False
+        
+        # Update state from device
+        self._update_state_from_device()
+    
+    @property
+    def percentage(self) -> Optional[int]:
+        """Return current speed percentage (0-100)."""
+        return self._attr_percentage
+    
+    @property
+    def speed_count(self) -> int:
+        """Return number of speeds."""
+        return 4  # Low, Medium, High, Max
+    
+    @property
+    def preset_modes(self) -> List[str]:
+        """Return available preset modes."""
+        return list(PRESET_MODES.keys())
+    
+    @property
+    def preset_mode(self) -> Optional[str]:
+        """Return current preset mode."""
+        return self._attr_preset_mode
+    
+    @property
+    def supported_features(self) -> int:
+        """Return supported features."""
+        return FanEntityFeature.PRESET_MODE | FanEntityFeature.SET_SPEED
+    
+    def _check_heater_safety(self, requested_speed: int) -> int:
+        """
+        Enforce heater safety rules.
+        Returns adjusted speed if heater requires minimum flow.
+        """
+        if self._heater_on:
+            if requested_speed < 50 and requested_speed > 0:
+                _LOGGER.warning(
+                    f"Heater is ON - enforcing minimum 50% pump speed for safety (requested: {requested_speed}%)"
+                )
+                self._minimum_speed_override = True
+                return 50  # Force minimum 50% when heater is on
+            elif requested_speed == 0:
+                _LOGGER.error(
+                    "SAFETY: Cannot turn off pump while heater is running! "
+                    "Please turn off heater first."
+                )
+                # Return current speed to prevent shutdown
+                return self._attr_percentage if self._attr_percentage > 0 else 50
+        
+        self._minimum_speed_override = False
+        return requested_speed
+    
+    async def async_set_percentage(self, percentage: int) -> None:
+        """Set pump speed with debouncing and heater safety."""
+        # Apply heater safety rules
+        safe_speed = self._check_heater_safety(percentage)
+        
+        if safe_speed != percentage:
+            # Notify user if speed was adjusted for safety
+            await self._notify_safety_override(percentage, safe_speed)
+            if safe_speed == self._attr_percentage:
+                # Speed unchanged due to safety, don't proceed
+                return
+        
+        # Cancel any pending speed change
+        if self._speed_change_task and not self._speed_change_task.done():
+            self._speed_change_task.cancel()
+        
+        # Store pending speed change
+        self._pending_speed_change = safe_speed
+        self._last_speed_change = time.time()
+        
+        # Create debounced task
+        self._speed_change_task = asyncio.create_task(
+            self._debounced_speed_change(safe_speed)
+        )
+    
+    async def _debounced_speed_change(self, speed: int) -> None:
+        """Execute speed change after debounce delay."""
+        try:
+            # Wait for slider to settle (1.5 seconds)
+            await asyncio.sleep(1.5)
+            
+            # Only execute if this is still the latest request
+            if self._pending_speed_change == speed:
+                await self._execute_speed_change(speed)
+        except asyncio.CancelledError:
+            _LOGGER.debug(f"Speed change to {speed}% was cancelled")
+    
+    async def _execute_speed_change(self, speed: int) -> None:
+        """Execute the actual speed change."""
+        _LOGGER.info(f"Executing pump speed change to {speed}%")
+        
+        try:
+            # Map speed to program
+            target_program_id = SPEED_TO_PROGRAM.get(speed)
+            
+            # Stop any currently running programs
+            for program in self._device.programs:
+                if program.running:
+                    _LOGGER.debug(f"Stopping program {program.id} ({program.name})")
+                    await self.hass.async_add_executor_job(
+                        self._hub.stop_program,
+                        self._device.pentair_device_id,
+                        program.id
+                    )
+                    # Small delay between stop and start
+                    await asyncio.sleep(0.5)
+            
+            if target_program_id is not None:
+                # Start the appropriate program
+                _LOGGER.info(f"Starting program {target_program_id} for {speed}% speed")
+                success = await self.hass.async_add_executor_job(
+                    self._hub.start_program,
+                    self._device.pentair_device_id,
+                    target_program_id
+                )
+                
+                if success:
+                    self._attr_percentage = speed
+                    self._attr_is_on = True
+                    self._update_preset_mode(speed)
+                else:
+                    _LOGGER.error(f"Failed to start program {target_program_id}")
+            else:
+                # Speed is 0, pump is off
+                self._attr_percentage = 0
+                self._attr_is_on = False
+                self._attr_preset_mode = "off"
+            
+            # Force immediate status update
+            await self.hass.async_add_executor_job(
+                self._hub.update_pentair_devices_status
+            )
+            
+            # Update HA state
+            self.async_write_ha_state()
+            
+        except Exception as e:
+            _LOGGER.error(f"Error executing speed change: {e}")
+    
+    async def async_set_preset_mode(self, preset_mode: str) -> None:
+        """Set pump to preset mode."""
+        speed = PRESET_MODES.get(preset_mode, 0)
+        await self.async_set_percentage(speed)
+    
+    async def async_turn_on(self, percentage: Optional[int] = None, preset_mode: Optional[str] = None, **kwargs) -> None:
+        """Turn on pump."""
+        if preset_mode is not None:
+            await self.async_set_preset_mode(preset_mode)
+        elif percentage is not None:
+            await self.async_set_percentage(percentage)
+        else:
+            # Default to medium speed
+            await self.async_set_percentage(50)
+    
+    async def async_turn_off(self, **kwargs) -> None:
+        """Turn off pump with heater safety check."""
+        if self._heater_on:
+            _LOGGER.error(
+                "SAFETY: Cannot turn off pump while heater is running! "
+                "Turn off heater first."
+            )
+            
+            # Create persistent notification
+            await self.hass.services.async_call(
+                "persistent_notification",
+                "create",
+                {
+                    "title": "Pool Pump Safety Alert",
+                    "message": "Cannot turn off pool pump while heater is active. "
+                               "Please turn off the heater first for safety.",
+                    "notification_id": "pentair_pump_safety_block"
+                }
+            )
+            
+            raise HomeAssistantError(
+                "Pool pump cannot be turned off while heater is active. "
+                "Please turn off the heater first for safety."
+            )
+        
+        await self.async_set_percentage(0)
+    
+    def _update_preset_mode(self, speed: int) -> None:
+        """Update preset mode based on speed."""
+        if speed >= 100:
+            self._attr_preset_mode = "max"
+        elif speed >= 75:
+            self._attr_preset_mode = "high"
+        elif speed >= 50:
+            self._attr_preset_mode = "medium"
+        elif speed >= 30:
+            self._attr_preset_mode = "low"
+        else:
+            self._attr_preset_mode = "off"
+    
+    def _update_state_from_device(self) -> None:
+        """Update entity state from device programs."""
+        # Check which program is running
+        for program in self._device.programs:
+            if program.running:
+                # Map program to speed
+                speed = PROGRAM_TO_SPEED.get(program.id, 0)
+                if speed > 0:
+                    self._attr_percentage = speed
+                    self._attr_is_on = True
+                    self._update_preset_mode(speed)
+                    if DEBUG_INFO:
+                        _LOGGER.debug(f"Pump running program {program.id} ({program.name}) at {speed}%")
+                    return
+        
+        # No programs running
+        self._attr_percentage = 0
+        self._attr_is_on = False
+        self._attr_preset_mode = "off"
+    
+    async def _notify_safety_override(self, requested: int, actual: int) -> None:
+        """Notify user when speed is adjusted for safety."""
+        await self.hass.services.async_call(
+            "persistent_notification",
+            "create",
+            {
+                "title": "Pool Pump Safety Override",
+                "message": f"Pool pump speed adjusted for heater safety.\n"
+                          f"Requested: {requested}%\n"
+                          f"Set to: {actual}% (minimum for heater operation)\n"
+                          f"Turn off heater to use lower speeds.",
+                "notification_id": "pentair_pump_safety"
+            }
+        )
+    
+    def update_heater_state(self, heater_on: bool) -> None:
+        """Update heater state for safety checks."""
+        _LOGGER.info(f"Heater state updated: {'ON' if heater_on else 'OFF'}")
+        self._heater_on = heater_on
+        
+        # If heater just turned on and pump is below 50%, force increase
+        if heater_on and 0 < self._attr_percentage < 50:
+            _LOGGER.info("Heater turned on - increasing pump speed to minimum 50%")
+            asyncio.create_task(self.async_set_percentage(50))
+    
+    async def async_update(self) -> None:
+        """Update entity state from device."""
+        self._update_state_from_device()
+    
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data from coordinator."""
+        self._update_state_from_device()
+        self.async_write_ha_state()

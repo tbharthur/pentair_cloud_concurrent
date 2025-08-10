@@ -20,8 +20,9 @@ PENTAIR_USER_PROFILE_PATH = "/user/user-service/common/profilev2"
 PENTAIR_DEVICES_PATH = "/device/device-service/user/devices"
 PENTAIR_DEVICES_2_PATH = "/device2/device2-service/user/device"
 PENTAIR_DEVICE_SERVICE_PATH = "/device/device-service/user/device/"
-UPDATE_MIN_SECONDS = 60  # Minimum time between two update requests
+UPDATE_MIN_SECONDS = 10  # Minimum time between two update requests - reduced from 60
 PROGRAM_START_MIN_SECONDS = 5  # Reduced for concurrent activation
+DEBOUNCE_SECONDS = 2  # Debounce delay for rapid command changes
 
 
 class PentairPumpProgram:

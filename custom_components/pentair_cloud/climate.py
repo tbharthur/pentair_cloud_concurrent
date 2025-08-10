@@ -47,6 +47,9 @@ async def async_setup_entry(
     # Get heater program from config
     heater_program = config_entry.data.get("relay_heater", 6)
     
+    # Get pump fan entity reference if it exists
+    pump_fan = hass.data[DOMAIN][config_entry.entry_id].get("pump_fan")
+    
     entities = []
     
     for device in devices:
@@ -56,7 +59,8 @@ async def async_setup_entry(
                 hub, 
                 device, 
                 heater_program,
-                temperature_sensor
+                temperature_sensor,
+                pump_fan
             )
         )
     
@@ -81,6 +85,7 @@ class PentairPoolHeater(ClimateEntity, RestoreEntity):
         device: PentairDevice,
         heater_program: int,
         temperature_sensor: str,
+        pump_fan=None,
     ) -> None:
         """Initialize the pool heater."""
         self._logger = logger
@@ -88,6 +93,7 @@ class PentairPoolHeater(ClimateEntity, RestoreEntity):
         self._device = device
         self._heater_program = heater_program
         self._temperature_sensor = temperature_sensor
+        self._pump_fan = pump_fan  # Reference to pump fan entity for safety integration
         
         self._attr_name = f"{device.nickname} Pool Heater"
         self._attr_unique_id = f"pentair_{device.pentair_device_id}_pool_heater"
@@ -158,53 +164,45 @@ class PentairPoolHeater(ClimateEntity, RestoreEntity):
     
     async def _async_turn_on_heater(self) -> None:
         """Turn on the pool heater."""
-        # Ensure pump is running
-        if not self._device.pump_running:
-            if DEBUG_INFO:
-                self._logger.info(
-                    "Heater requested but pump is off - starting pump at medium speed"
-                )
+        # Notify pump fan that heater is turning on
+        if self._pump_fan:
+            self._pump_fan.update_heater_state(True)
             
-            # Get medium speed program from config
-            config_entry = self.hass.config_entries.async_get_entry(
-                list(self.hass.data[DOMAIN].keys())[0]
-            )
-            medium_speed_program = config_entry.data.get("speed_medium", 2)
-            
-            # Turn on pump at medium speed
-            await self.hass.async_add_executor_job(
-                self._hub.activate_program_concurrent,
-                self._device.pentair_device_id,
-                medium_speed_program
-            )
-            
-            # Wait a moment for pump to start
-            await asyncio.sleep(2)
-            
-            # Force a status update to get the latest pump state
-            await self.hass.async_add_executor_job(
-                self._hub.update_pentair_devices_status
-            )
-            
-            # Wait a bit more for the update to complete
-            await asyncio.sleep(1)
-            
-            # Update pump speed entity to reflect the new speed
-            pump_speed_entity_id = f"number.{self._device.nickname.lower().replace(' ', '_')}_speed_control"
-            try:
-                # Force update of the pump speed entity
-                await self.hass.services.async_call(
-                    "homeassistant",
-                    "update_entity",
-                    {"entity_id": pump_speed_entity_id},
-                    blocking=False
-                )
+            # Ensure pump is running at minimum 50% speed
+            if not self._pump_fan.is_on or self._pump_fan.percentage < 50:
                 if DEBUG_INFO:
-                    self._logger.info(f"Requested update for pump speed entity: {pump_speed_entity_id}")
-            except Exception as e:
+                    self._logger.info(
+                        f"Heater requested - ensuring pump runs at minimum 50% (current: {self._pump_fan.percentage}%)"
+                    )
+                # Turn on pump at 50% minimum speed for heater
+                await self._pump_fan.async_set_percentage(50)
+                # Wait for pump to start
+                await asyncio.sleep(2)
+        else:
+            # Fallback to old behavior if no pump fan entity
+            if not self._device.pump_running:
                 if DEBUG_INFO:
-                    self._logger.warning(f"Could not update pump speed entity: {e}")
+                    self._logger.info(
+                        "Heater requested but pump is off - starting pump at medium speed"
+                    )
+                
+                # Get medium speed program from config
+                config_entry = self.hass.config_entries.async_get_entry(
+                    list(self.hass.data[DOMAIN].keys())[0]
+                )
+                medium_speed_program = config_entry.data.get("speed_medium", 2)
+                
+                # Turn on pump at medium speed
+                await self.hass.async_add_executor_job(
+                    self._hub.activate_program_concurrent,
+                    self._device.pentair_device_id,
+                    medium_speed_program
+                )
+                
+                # Wait a moment for pump to start
+                await asyncio.sleep(2)
             
+        # Turn on heater program
         await self.hass.async_add_executor_job(
             self._hub.activate_program_concurrent,
             self._device.pentair_device_id,
@@ -212,6 +210,9 @@ class PentairPoolHeater(ClimateEntity, RestoreEntity):
         )
         self._heater_on = True
         self._is_heating = True
+        
+        if DEBUG_INFO:
+            self._logger.info(f"Pool heater turned ON")
     
     async def _async_turn_off_heater(self) -> None:
         """Turn off the pool heater."""
@@ -222,6 +223,13 @@ class PentairPoolHeater(ClimateEntity, RestoreEntity):
         )
         self._heater_on = False
         self._is_heating = False
+        
+        # Notify pump fan that heater is off
+        if self._pump_fan:
+            self._pump_fan.update_heater_state(False)
+        
+        if DEBUG_INFO:
+            self._logger.info(f"Pool heater turned OFF")
     
     @property
     def device_info(self):
