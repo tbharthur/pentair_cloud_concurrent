@@ -16,7 +16,8 @@ from .pentaircloud_modified import PentairCloudHub
 from .const import DOMAIN
 
 # Add all platforms including new FAN platform for pump control
-PLATFORMS: list[Platform] = [Platform.LIGHT, Platform.FAN, Platform.NUMBER, Platform.SWITCH, Platform.CLIMATE]
+# Note: NUMBER platform removed as pump control is now handled by FAN platform
+PLATFORMS: list[Platform] = [Platform.LIGHT, Platform.FAN, Platform.SWITCH, Platform.CLIMATE]
 
 CONFIG_SCHEMA = vol.Schema(
     {
