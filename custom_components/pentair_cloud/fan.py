@@ -214,8 +214,8 @@ class PentairPumpFan(FanEntity):
     async def _debounced_speed_change(self, speed: int) -> None:
         """Execute speed change after debounce delay."""
         try:
-            # Wait for slider to settle (1.5 seconds)
-            await asyncio.sleep(1.5)
+            # Wait for slider to settle (reduced to 0.5 seconds for better responsiveness)
+            await asyncio.sleep(0.5)
             
             # Only execute if this is still the latest request
             if self._pending_speed_change == speed:
@@ -228,34 +228,43 @@ class PentairPumpFan(FanEntity):
         _LOGGER.info(f"Executing pump speed change to {speed}%")
         
         try:
-            # Map speed percentage to appropriate program
-            # We need to handle any percentage value, not just exact matches
+            # Map speed percentage to appropriate program and actual speed
+            # Programs: 1=100%, 2=50%, 3=30%, 4=75%
             if speed == 0:
                 target_program_id = None
+                actual_speed = 0
             elif speed <= 30:
-                target_program_id = 3  # Low speed (30%)
+                target_program_id = 3  # Low speed program
+                actual_speed = 30  # Actual speed is 30%
             elif speed <= 50:
-                target_program_id = 2  # Medium speed (50%)
+                target_program_id = 2  # Medium speed program
+                actual_speed = 50  # Actual speed is 50%
             elif speed <= 75:
-                target_program_id = 4  # High speed (75%)
+                target_program_id = 4  # High speed program
+                actual_speed = 75  # Actual speed is 75%
             else:
-                target_program_id = 1  # Max speed (100%)
+                target_program_id = 1  # Max speed program
+                actual_speed = 100  # Actual speed is 100%
             
-            # Stop any currently running programs
+            _LOGGER.info(f"Mapped {speed}% to program {target_program_id} with actual speed {actual_speed}%")
+            
+            # Only stop pump programs (1-4), not relay programs
             for program in self._device.programs:
-                if program.running:
-                    _LOGGER.debug(f"Stopping program {program.id} ({program.name})")
-                    await self.hass.async_add_executor_job(
+                if program.running and program.id in [1, 2, 3, 4]:
+                    _LOGGER.debug(f"Stopping pump program {program.id} ({program.name})")
+                    success = await self.hass.async_add_executor_job(
                         self._hub.stop_program,
                         self._device.pentair_device_id,
                         program.id
                     )
+                    if not success:
+                        _LOGGER.error(f"Failed to stop program {program.id}")
                     # Small delay between stop and start
                     await asyncio.sleep(0.5)
             
             if target_program_id is not None:
                 # Start the appropriate program
-                _LOGGER.info(f"Starting program {target_program_id} for {speed}% speed")
+                _LOGGER.info(f"Starting program {target_program_id} for {actual_speed}% speed")
                 success = await self.hass.async_add_executor_job(
                     self._hub.start_program,
                     self._device.pentair_device_id,
@@ -263,21 +272,32 @@ class PentairPumpFan(FanEntity):
                 )
                 
                 if success:
-                    self._attr_percentage = speed
+                    # Set the actual speed, not the requested speed
+                    self._attr_percentage = actual_speed
                     self._attr_is_on = True
-                    self._update_preset_mode(speed)
+                    self._update_preset_mode(actual_speed)
+                    _LOGGER.info(f"Successfully set pump to {actual_speed}%")
                 else:
                     _LOGGER.error(f"Failed to start program {target_program_id}")
+                    # Don't update state if command failed
+                    return
             else:
                 # Speed is 0, pump is off
                 self._attr_percentage = 0
                 self._attr_is_on = False
                 self._attr_preset_mode = "off"
+                _LOGGER.info("Pump turned off")
             
             # Force immediate status update
             await self.hass.async_add_executor_job(
                 self._hub.update_pentair_devices_status
             )
+            
+            # Wait a moment for the status to propagate
+            await asyncio.sleep(1)
+            
+            # Re-read state from device to ensure accuracy
+            self._update_state_from_device()
             
             # Update HA state
             self.async_write_ha_state()
@@ -292,10 +312,17 @@ class PentairPumpFan(FanEntity):
     
     async def async_turn_on(self, percentage: Optional[int] = None, preset_mode: Optional[str] = None, **kwargs) -> None:
         """Turn on pump."""
+        _LOGGER.info(f"Turning on pump with percentage={percentage}, preset_mode={preset_mode}")
+        
         if preset_mode is not None:
             await self.async_set_preset_mode(preset_mode)
         elif percentage is not None:
-            await self.async_set_percentage(percentage)
+            # Ensure we use a valid speed
+            if percentage > 0:
+                await self.async_set_percentage(percentage)
+            else:
+                # If percentage is 0 or unset, default to medium
+                await self.async_set_percentage(50)
         else:
             # Default to medium speed
             await self.async_set_percentage(50)
