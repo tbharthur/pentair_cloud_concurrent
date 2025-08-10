@@ -137,9 +137,13 @@ class PentairPumpFan(FanEntity):
     @property
     def supported_features(self) -> int:
         """Return supported features."""
-        # Note: TURN_ON and TURN_OFF are supported by default in FanEntity
-        # We only need to add the additional features we support
-        return FanEntityFeature.PRESET_MODE | FanEntityFeature.SET_SPEED
+        # As of HA 2024.8, TURN_ON and TURN_OFF must be explicitly declared
+        return (
+            FanEntityFeature.TURN_ON
+            | FanEntityFeature.TURN_OFF
+            | FanEntityFeature.PRESET_MODE 
+            | FanEntityFeature.SET_SPEED
+        )
     
     @property
     def device_info(self):
