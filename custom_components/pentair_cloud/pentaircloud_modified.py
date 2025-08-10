@@ -362,6 +362,7 @@ class PentairCloudHub:
             self.LOGGER.error(
                 "Exception while activating program (Empty token)."
             )
+            return False
 
     def deactivate_program(self, deviceId: str, program_id: int) -> None:
         """Deactivate a specific program.
@@ -381,8 +382,24 @@ class PentairCloudHub:
                 endpoint = PENTAIR_ENDPOINT + PENTAIR_DEVICE_SERVICE_PATH + deviceId
                 field_name = f"zp{program_id}e10"
                 
-                # Pump programs (1-4) stop but stay enabled, relay programs (5-8) turn off completely
-                if program_id <= 4:
+                # Determine if this is a pump program by checking the actual program name
+                is_pump_program = False
+                for device in self.devices:
+                    if device.pentair_device_id == deviceId:
+                        for program in device.programs:
+                            if program.id == program_id:
+                                # Check if this is a speed program or pump control program
+                                if ("Speed" in program.name or 
+                                    "Quick Clean" in program.name or
+                                    "Daily Schedule" in program.name):
+                                    is_pump_program = True
+                                    if DEBUG_INFO:
+                                        self.LOGGER.info(f"Program {program_id} '{program.name}' identified as pump program")
+                                    break
+                        break
+                
+                # Pump programs use e10=1 to stop (keeps enabled), relay programs use e10=0 (fully off)
+                if is_pump_program:
                     payload = {"payload": {field_name: "1"}}
                 else:
                     payload = {"payload": {field_name: "0"}}
@@ -407,13 +424,16 @@ class PentairCloudHub:
                         for program in device.programs:
                             if program.id == program_id:
                                 program.running = False
-                                program.control_value = 1 if program_id <= 4 else 0
+                                program.control_value = 1 if is_pump_program else 0
+                return True  # Success
                 
             except Exception as err:
                 self.LOGGER.error(
                     "Exception with Pentair API (Deactivate Program). %s",
                     err,
                 )
+                return False  # Failed
+        return False  # No token
 
     def stop_all_programs(self, deviceId: str) -> None:
         """Stop all programs on a device."""
@@ -423,13 +443,13 @@ class PentairCloudHub:
         for i in range(1, 9):
             self.deactivate_program(deviceId, i)
 
-    def start_program(self, deviceId: str, program_id: int) -> None:
+    def start_program(self, deviceId: str, program_id: int) -> bool:
         """Legacy method - redirects to concurrent activation."""
-        self.activate_program_concurrent(deviceId, program_id)
+        return self.activate_program_concurrent(deviceId, program_id)
 
-    def stop_program(self, deviceId: str, program_id: int) -> None:
+    def stop_program(self, deviceId: str, program_id: int) -> bool:
         """Legacy method - redirects to deactivation."""
-        self.deactivate_program(deviceId, program_id)
+        return self.deactivate_program(deviceId, program_id)
 
     def authenticate(self, username: str, password: str) -> bool:
         try:
