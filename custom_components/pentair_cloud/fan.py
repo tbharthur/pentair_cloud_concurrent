@@ -115,6 +115,8 @@ class PentairPumpFan(FanEntity):
     @property
     def supported_features(self) -> int:
         """Return supported features."""
+        # Note: TURN_ON and TURN_OFF are supported by default in FanEntity
+        # We only need to add the additional features we support
         return FanEntityFeature.PRESET_MODE | FanEntityFeature.SET_SPEED
     
     @property
@@ -300,22 +302,37 @@ class PentairPumpFan(FanEntity):
     def _update_state_from_device(self) -> None:
         """Update entity state from device programs."""
         # Check which program is running
+        # Only programs 1-4 control pump speed, others are relay programs
+        pump_running = False
+        
+        if DEBUG_INFO:
+            running_programs = [p.id for p in self._device.programs if p.running]
+            if running_programs:
+                _LOGGER.debug(f"Running programs: {running_programs}")
+        
         for program in self._device.programs:
             if program.running:
-                # Map program to speed
-                speed = PROGRAM_TO_SPEED.get(program.id, 0)
-                if speed > 0:
+                if program.id in PROGRAM_TO_SPEED:
+                    # This is a pump speed program
+                    speed = PROGRAM_TO_SPEED[program.id]
                     self._attr_percentage = speed
                     self._attr_is_on = True
                     self._update_preset_mode(speed)
+                    pump_running = True
                     if DEBUG_INFO:
                         _LOGGER.debug(f"Pump running program {program.id} ({program.name}) at {speed}%")
-                    return
+                    break  # Only one pump program should be active
+                else:
+                    if DEBUG_INFO:
+                        _LOGGER.debug(f"Program {program.id} ({program.name}) is running but is not a pump speed program")
         
-        # No programs running
-        self._attr_percentage = 0
-        self._attr_is_on = False
-        self._attr_preset_mode = "off"
+        if not pump_running:
+            # No pump speed programs running
+            self._attr_percentage = 0
+            self._attr_is_on = False
+            self._attr_preset_mode = "off"
+            if DEBUG_INFO:
+                _LOGGER.debug("No pump speed programs running - pump is OFF")
     
     async def _notify_safety_override(self, requested: int, actual: int) -> None:
         """Notify user when speed is adjusted for safety."""
