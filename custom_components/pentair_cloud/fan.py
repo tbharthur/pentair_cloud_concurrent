@@ -28,16 +28,9 @@ PRESET_MODES = {
     "max": 100
 }
 
-SPEED_TO_PROGRAM = {
-    0: None,      # Off
-    30: 3,        # Low Speed program
-    50: 2,        # Regular program
-    75: 4,        # Service Mode program
-    100: 1        # Quick Clean program
-}
-
-PROGRAM_TO_SPEED = {v: k for k, v in SPEED_TO_PROGRAM.items() if v is not None}
-PROGRAM_TO_SPEED[None] = 0
+# Note: Actual program mappings come from config_entry.data
+# The old hardcoded SPEED_TO_PROGRAM and PROGRAM_TO_SPEED have been removed
+# as they assumed fixed program IDs which may not match user's setup
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -269,9 +262,9 @@ class PentairPumpFan(FanEntity):
             
             _LOGGER.info(f"Mapped {speed}% to program {target_program_id} with actual speed {actual_speed}%")
             
-            # Only stop pump programs (1-4), not relay programs
+            # Only stop pump programs (from our mapped programs), not relay programs
             for program in self._device.programs:
-                if program.running and program.id in [1, 2, 3, 4]:
+                if program.running and program.id in self._program_to_speed:
                     _LOGGER.debug(f"Stopping pump program {program.id} ({program.name})")
                     success = await self.hass.async_add_executor_job(
                         self._hub.stop_program,
