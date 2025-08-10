@@ -2,7 +2,8 @@
 Homeassistant Pentair cloud custom integration with enhanced concurrent program control.
 
 Supports the Pentair IntelliFlo 3 VS Pump with the Wifi module. This integration provides:
-- **Pump Speed Control** - A 0-100% slider that maps to your configured pump speed programs
+- **Pump Speed Control** - Fan entity with 0-100% speed control and preset modes (HomeKit compatible!)
+- **Heater Safety Logic** - Automatic pump speed enforcement when heater is running (minimum 50%)
 - **Individual Relay Control** - Pool lights as light entity, heater as switch
 - **Automatic Climate Entity** - Optional thermostat creation with temperature sensor
 - **Legacy Program Support** - Virtual "Light" entities for each program (backward compatibility)
@@ -15,10 +16,19 @@ Note: This project is not associated with or endorsed by Pentair.
 
 This fork enables **independent control** of pump speed and relay states by leveraging a discovered capability: multiple programs can be active simultaneously. One program controls the pump motor (tracked by s14), while other programs can control relays independently.
 
+### 🎉 Version 2.0 - Fan Entity Update
+- **NEW: Fan Entity for Pump Control** - Replaces number entity with proper fan entity
+- **NEW: HomeKit Compatible** - Works natively with Apple HomeKit as a fan with speed control
+- **NEW: Heater Safety Logic** - Pump automatically maintains minimum 50% speed when heater is on
+- **NEW: Preset Modes** - Easy selection: Off, Low (30%), Medium (50%), High (75%), Max (100%)
+- **IMPROVED: Response Time** - Reduced delays from 30s/60s to 5s/10s for better responsiveness
+- **IMPROVED: Debouncing** - Smooth slider control without command flooding
+
 ### Key Features:
-- **Pump Speed Slider**: Control pump speed from 0-100% (mapped to your preset programs)
+- **Pump Speed Control**: Fan entity with percentage and preset modes
+- **Safety Enforcement**: Prevents unsafe pump operation when heater is running
 - **Relay Switches**: Turn lights and heater on/off independently
-- **Smart Control**: Relays only activate when pump is running
+- **Smart Control**: Automatic pump management for heater operation
 - **Full Integration**: Perfect for creating climate entities with external temperature sensors
 
 Example: You can now run your pump at 50% speed while independently controlling your pool lights and heater - something not possible with the original single-program limitation.
@@ -43,12 +53,15 @@ Setting up a custom repository is done by:
 
 For this integration to work properly, you need to configure your Pentair programs as follows:
 
-**Speed Programs** (configure these with your desired speeds):
-- 4 programs with different pump speeds (e.g., 30%, 50%, 75%, 100%)
+**Speed Programs** (required for fan entity speed control):
+- **Program 1**: Quick Clean or Max Speed (100%)
+- **Program 2**: Regular or Medium Speed (50%)
+- **Program 3**: Low Speed (30%)
+- **Program 4**: Service Mode or High Speed (75%)
 
 **Relay Control Programs** (configure these with appropriate relay settings):
-- 1 program for Lights (Relay 1 ON, Relay 2 OFF)
-- 1 program for Heater (Relay 1 OFF, Relay 2 ON)
+- **Program 5 or 6**: Lights (Relay 1 ON, Relay 2 OFF)
+- **Program 6 or 7**: Heater (Relay 1 OFF, Relay 2 ON)
 
 During setup, you'll be able to:
 - Select which programs control each function from dropdown lists
@@ -61,10 +74,15 @@ After installation and configuration, you'll have these entities:
 
 ### Primary Controls (Use These!)
 
-#### Pump Speed Control
-- **Entity**: `number.[device_name]_speed_control`
-- **Name**: "[Device Name] Speed Control"
-- **Control**: 0-100% slider (0 = off)
+#### Pump Speed Control (NEW - Fan Entity!)
+- **Entity**: `fan.[device_name]_pump`
+- **Name**: "[Device Name] Pump"
+- **Type**: Fan entity with speed control
+- **Control**: 
+  - Percentage: 0-100% speed control
+  - Preset Modes: Off, Low (30%), Medium (50%), High (75%), Max (100%)
+- **HomeKit**: Appears as a fan with speed control
+- **Safety**: Enforces minimum 50% speed when heater is on
 
 #### Pool Light
 - **Entity**: `light.[device_name]_light`
@@ -106,13 +124,65 @@ cards:
   - type: entities
     title: Pool Control
     entities:
-      - entity: number.pentair_pool_pump_speed
+      - entity: fan.pool_pump
         name: Pump Speed
-      - entity: switch.pentair_pool_relay_lights
+      - entity: light.pool_lights
         name: Pool Lights
       - entity: climate.pool_heater
         name: Pool Heater
 ```
+
+### HomeKit Configuration
+```yaml
+homekit:
+  filter:
+    include_entities:
+      - fan.pool_pump  # Will appear as fan with speed control
+      - light.pool_lights
+      - climate.pool_heater
+```
+
+### Example Automations with Fan Entity
+```yaml
+# Turn pump to medium speed at sunset
+automation:
+  - alias: "Pool Pump Evening Schedule"
+    trigger:
+      - platform: sun
+        event: sunset
+    action:
+      - service: fan.turn_on
+        target:
+          entity_id: fan.pool_pump
+        data:
+          percentage: 50  # or use preset_mode: "medium"
+
+# Use preset modes for easy control
+  - alias: "Pool Cleaning Mode"
+    trigger:
+      - platform: time
+        at: "10:00:00"
+    action:
+      - service: fan.set_preset_mode
+        target:
+          entity_id: fan.pool_pump
+        data:
+          preset_mode: "max"  # Run at 100% for cleaning
+```
+
+## Migration from v1.x (Number Entity) to v2.0 (Fan Entity)
+
+If you're upgrading from the previous version that used a number entity for pump control:
+
+1. **Update the integration** through HACS or manually
+2. **Restart Home Assistant**
+3. The old `number.[device]_speed_control` entity will be gone
+4. New entity: `fan.[device]_pump` will appear
+5. **Update your automations** to use fan services:
+   - Old: `number.set_value` with `value: 50`
+   - New: `fan.turn_on` with `percentage: 50` or `preset_mode: "medium"`
+6. **Update dashboards** to reference the new fan entity
+7. **Add to HomeKit** if desired - it will appear as a fan with speed control
 
 ## Manual Installation
 
@@ -120,10 +190,23 @@ If you don't want to use HACS or just prefer manual installs, you can install th
 
 ## Technical Details
 
+### Concurrent Program Control
 This integration leverages the ability to have multiple Pentair programs active simultaneously:
 - One program controls the pump motor speed (tracked by field s14)
 - Other programs can control relays independently (tracked by fields s30/s31)
 - Programs use the e10 field with value 3 to indicate active control
 - Both relay programs can be active at the same time, eliminating the need for a "both relays" program
+
+### Heater Safety Implementation
+The fan entity includes built-in safety logic to prevent equipment damage:
+- **Minimum Speed Enforcement**: Pump automatically maintains 50% minimum speed when heater is on
+- **Turn-off Prevention**: Pump cannot be turned off while heater is running
+- **Automatic Start**: If heater turns on while pump is off/slow, pump automatically starts at 50%
+- **User Notifications**: Clear persistent notifications explain when and why safety overrides occur
+
+### Performance Improvements
+- **Reduced API Delays**: UPDATE_MIN_SECONDS reduced from 60s to 10s
+- **Faster Command Response**: PROGRAM_START_MIN_SECONDS reduced from 30s to 5s
+- **Debounced Control**: 1.5 second debounce prevents command flooding during slider adjustments
 
 This approach provides granular control over pump speed and relay states that isn't possible through the standard Pentair app interface.
