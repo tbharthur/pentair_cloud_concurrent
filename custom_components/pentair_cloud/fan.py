@@ -93,6 +93,28 @@ class PentairPumpFan(FanEntity):
         self._update_state_from_device()
     
     @property
+    def unique_id(self) -> str:
+        """Return unique ID."""
+        return self._attr_unique_id
+    
+    @property
+    def name(self) -> str:
+        """Return the name of the fan."""
+        return self._attr_name
+    
+    @property
+    def is_on(self) -> bool:
+        """Return true if the fan is on."""
+        return self._attr_is_on
+    
+    @property
+    def icon(self) -> str:
+        """Return the icon to use in the frontend."""
+        if self._attr_is_on:
+            return "mdi:pump"
+        return "mdi:pump-off"
+    
+    @property
     def percentage(self) -> Optional[int]:
         """Return current speed percentage (0-100)."""
         return self._attr_percentage
