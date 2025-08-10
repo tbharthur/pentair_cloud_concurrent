@@ -370,16 +370,25 @@ class PentairPumpFan(FanEntity):
         
         # Stop all pump programs directly
         try:
+            any_failed = False
             for program in self._device.programs:
                 if program.running and program.id in self._program_to_speed:
                     _LOGGER.debug(f"Stopping pump program {program.id}")
-                    await self.hass.async_add_executor_job(
+                    success = await self.hass.async_add_executor_job(
                         self._hub.stop_program,
                         self._device.pentair_device_id,
                         program.id
                     )
+                    if not success:
+                        _LOGGER.error(f"Failed to stop pump program {program.id}")
+                        any_failed = True
             
-            # Update state
+            if any_failed:
+                _LOGGER.error("Some programs failed to stop - pump may still be running")
+                # Don't update state if we failed to stop
+                return
+            
+            # Update state only if all stops succeeded
             self._attr_percentage = 0
             self._attr_is_on = False
             self._attr_preset_mode = "off"

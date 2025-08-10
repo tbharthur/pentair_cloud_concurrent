@@ -398,11 +398,30 @@ class PentairCloudHub:
                                     break
                         break
                 
-                # Pump programs use e10=1 to stop (keeps enabled), relay programs use e10=0 (fully off)
+                # Check current state to determine proper stop value
+                # Programs with e10=2 when disabled need e10=2 to stop
+                # Programs with e10=1 when disabled need e10=1 to stop  
+                # Relay programs use e10=0 to fully turn off
+                stop_value = "0"  # Default for relay programs
+                
                 if is_pump_program:
-                    payload = {"payload": {field_name: "1"}}
-                else:
-                    payload = {"payload": {field_name: "0"}}
+                    # Check what the disabled state is for this program
+                    for device in self.devices:
+                        if device.pentair_device_id == deviceId:
+                            for program in device.programs:
+                                if program.id == program_id:
+                                    # If program uses e10=2 when disabled (manual programs)
+                                    # we need to send e10=2 to stop
+                                    if program.program_type == 2:  # Manual program
+                                        stop_value = "2"
+                                        if DEBUG_INFO:
+                                            self.LOGGER.info(f"Program {program_id} is manual type, using e10=2 to stop")
+                                    else:
+                                        stop_value = "1"
+                                    break
+                            break
+                
+                payload = {"payload": {field_name: stop_value}}
                 
                 if DEBUG_INFO:
                     self.LOGGER.info(f"Sending deactivation payload: {payload}")
@@ -414,8 +433,13 @@ class PentairCloudHub:
                     data=json.dumps(payload),
                 )
                 
+                if DEBUG_INFO:
+                    self.LOGGER.info(f"Stop response status: {response.status_code}")
+                    self.LOGGER.info(f"Stop response body: {response.text}")
+                
                 response_data = response.json()
-                if response_data["data"]["code"] != "set_device_success":
+                if response_data.get("data", {}).get("code") != "set_device_success":
+                    self.LOGGER.error(f"Failed to deactivate program: {response_data}")
                     raise Exception("Wrong response code deactivating program")
                 
                 # Update program state
@@ -424,7 +448,8 @@ class PentairCloudHub:
                         for program in device.programs:
                             if program.id == program_id:
                                 program.running = False
-                                program.control_value = 1 if is_pump_program else 0
+                                # Set control value to match what we sent
+                                program.control_value = int(stop_value)
                 return True  # Success
                 
             except Exception as err:
