@@ -179,6 +179,11 @@ class PentairPumpFan(FanEntity):
     
     async def async_set_percentage(self, percentage: int) -> None:
         """Set pump speed with debouncing and heater safety."""
+        _LOGGER.info(f"Setting pump speed to {percentage}%")
+        
+        # Ensure percentage is within valid range
+        percentage = max(0, min(100, int(percentage)))
+        
         # Apply heater safety rules
         safe_speed = self._check_heater_safety(percentage)
         
@@ -219,8 +224,18 @@ class PentairPumpFan(FanEntity):
         _LOGGER.info(f"Executing pump speed change to {speed}%")
         
         try:
-            # Map speed to program
-            target_program_id = SPEED_TO_PROGRAM.get(speed)
+            # Map speed percentage to appropriate program
+            # We need to handle any percentage value, not just exact matches
+            if speed == 0:
+                target_program_id = None
+            elif speed <= 30:
+                target_program_id = 3  # Low speed (30%)
+            elif speed <= 50:
+                target_program_id = 2  # Medium speed (50%)
+            elif speed <= 75:
+                target_program_id = 4  # High speed (75%)
+            else:
+                target_program_id = 1  # Max speed (100%)
             
             # Stop any currently running programs
             for program in self._device.programs:
@@ -283,6 +298,8 @@ class PentairPumpFan(FanEntity):
     
     async def async_turn_off(self, **kwargs) -> None:
         """Turn off pump with heater safety check."""
+        _LOGGER.info("Turning off pool pump")
+        
         if self._heater_on:
             _LOGGER.error(
                 "SAFETY: Cannot turn off pump while heater is running! "
@@ -306,7 +323,31 @@ class PentairPumpFan(FanEntity):
                 "Please turn off the heater first for safety."
             )
         
-        await self.async_set_percentage(0)
+        # Stop all pump programs directly
+        try:
+            for program in self._device.programs:
+                if program.running and program.id in PROGRAM_TO_SPEED:
+                    _LOGGER.debug(f"Stopping pump program {program.id}")
+                    await self.hass.async_add_executor_job(
+                        self._hub.stop_program,
+                        self._device.pentair_device_id,
+                        program.id
+                    )
+            
+            # Update state
+            self._attr_percentage = 0
+            self._attr_is_on = False
+            self._attr_preset_mode = "off"
+            
+            # Force status update
+            await self.hass.async_add_executor_job(
+                self._hub.update_pentair_devices_status
+            )
+            
+            self.async_write_ha_state()
+            
+        except Exception as e:
+            _LOGGER.error(f"Error turning off pump: {e}")
     
     def _update_preset_mode(self, speed: int) -> None:
         """Update preset mode based on speed."""
