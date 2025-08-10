@@ -49,10 +49,20 @@ async def async_setup_entry(
     hub = hass.data[DOMAIN][config_entry.entry_id].get("hub") or hass.data[DOMAIN][config_entry.entry_id].get("pentair_cloud_hub")
     coordinator = hass.data[DOMAIN][config_entry.entry_id].get("coordinator")
     
+    # Get the program mappings from config
+    program_mappings = {
+        "low": config_entry.data.get("speed_low", 3),
+        "medium": config_entry.data.get("speed_medium", 2),
+        "high": config_entry.data.get("speed_high", 4),
+        "max": config_entry.data.get("speed_max", 1),
+    }
+    
+    _LOGGER.info(f"Using program mappings from config: {program_mappings}")
+    
     entities = []
     for device in hub.get_devices():
-        # Create fan entity for each pump device
-        fan_entity = PentairPumpFan(hub, device, coordinator, hass)
+        # Create fan entity for each pump device with config mappings
+        fan_entity = PentairPumpFan(hub, device, coordinator, hass, program_mappings)
         entities.append(fan_entity)
         
         # Store reference for heater integration
@@ -66,14 +76,26 @@ async def async_setup_entry(
 class PentairPumpFan(FanEntity):
     """Pentair pump fan entity with heater safety."""
     
-    def __init__(self, hub: PentairCloudHub, device: PentairDevice, coordinator, hass: HomeAssistant):
+    def __init__(self, hub: PentairCloudHub, device: PentairDevice, coordinator, hass: HomeAssistant, program_mappings: dict):
         """Initialize the fan."""
         self._hub = hub
         self._device = device
         self._coordinator = coordinator
         self.hass = hass
+        self._program_mappings = program_mappings  # Store the actual program mappings from config
         self._attr_unique_id = f"pentair_pump_{device.pentair_device_id}"
         self._attr_name = f"{device.nickname} Pump"
+        
+        # Create reverse mapping for state updates
+        self._program_to_speed = {
+            program_mappings["low"]: 30,
+            program_mappings["medium"]: 50,
+            program_mappings["high"]: 75,
+            program_mappings["max"]: 100,
+        }
+        
+        _LOGGER.info(f"Fan entity initialized with program mappings: {self._program_mappings}")
+        _LOGGER.info(f"Program to speed mapping: {self._program_to_speed}")
         
         # State tracking
         self._attr_is_on = False
@@ -228,22 +250,21 @@ class PentairPumpFan(FanEntity):
         _LOGGER.info(f"Executing pump speed change to {speed}%")
         
         try:
-            # Map speed percentage to appropriate program and actual speed
-            # Programs: 1=100%, 2=50%, 3=30%, 4=75%
+            # Map speed percentage to appropriate program using actual config mappings
             if speed == 0:
                 target_program_id = None
                 actual_speed = 0
             elif speed <= 30:
-                target_program_id = 3  # Low speed program
+                target_program_id = self._program_mappings["low"]
                 actual_speed = 30  # Actual speed is 30%
             elif speed <= 50:
-                target_program_id = 2  # Medium speed program
+                target_program_id = self._program_mappings["medium"]
                 actual_speed = 50  # Actual speed is 50%
             elif speed <= 75:
-                target_program_id = 4  # High speed program
+                target_program_id = self._program_mappings["high"]
                 actual_speed = 75  # Actual speed is 75%
             else:
-                target_program_id = 1  # Max speed program
+                target_program_id = self._program_mappings["max"]
                 actual_speed = 100  # Actual speed is 100%
             
             _LOGGER.info(f"Mapped {speed}% to program {target_program_id} with actual speed {actual_speed}%")
@@ -357,7 +378,7 @@ class PentairPumpFan(FanEntity):
         # Stop all pump programs directly
         try:
             for program in self._device.programs:
-                if program.running and program.id in PROGRAM_TO_SPEED:
+                if program.running and program.id in self._program_to_speed:
                     _LOGGER.debug(f"Stopping pump program {program.id}")
                     await self.hass.async_add_executor_job(
                         self._hub.stop_program,
@@ -395,8 +416,7 @@ class PentairPumpFan(FanEntity):
     
     def _update_state_from_device(self) -> None:
         """Update entity state from device programs."""
-        # Check which program is running
-        # Only programs 1-4 control pump speed, others are relay programs
+        # Check which program is running using the actual mapped programs
         pump_running = False
         
         if DEBUG_INFO:
@@ -406,9 +426,9 @@ class PentairPumpFan(FanEntity):
         
         for program in self._device.programs:
             if program.running:
-                if program.id in PROGRAM_TO_SPEED:
+                if program.id in self._program_to_speed:
                     # This is a pump speed program
-                    speed = PROGRAM_TO_SPEED[program.id]
+                    speed = self._program_to_speed[program.id]
                     self._attr_percentage = speed
                     self._attr_is_on = True
                     self._update_preset_mode(speed)
