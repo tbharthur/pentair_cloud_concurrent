@@ -12,6 +12,7 @@ from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
 import logging
 from .pentaircloud_modified import PentairCloudHub
+from .coordinator import PentairDataUpdateCoordinator
 
 from .const import DOMAIN
 
@@ -70,10 +71,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             f"Exception while setting up Pentair Cloud. Will retry. {err}"
         )
 
+    # Create the data update coordinator
+    coordinator = PentairDataUpdateCoordinator(hass, hub)
+    
+    # Fetch initial data
+    await coordinator.async_config_entry_first_refresh()
+
     hass.data[DOMAIN][entry.entry_id] = {
         "pentair_cloud_hub": hub,  # Keep for backward compatibility
         "hub": hub,  # New consistent key
-        "coordinator": None,  # Not used currently but kept for compatibility
+        "coordinator": coordinator,  # Data update coordinator
         "pump_fan": None  # Will be set by fan platform
     }
 

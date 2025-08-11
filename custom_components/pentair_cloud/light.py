@@ -6,9 +6,10 @@ from typing import Any
 
 from homeassistant.components.light import LightEntity, ColorMode
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.entity import EntityCategory
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, DEBUG_INFO
 from .pentaircloud_modified import PentairCloudHub, PentairDevice, PentairPumpProgram
@@ -23,6 +24,7 @@ async def async_setup_entry(
 ) -> None:
     """Set up Pentair lights."""
     hub = hass.data[DOMAIN][config_entry.entry_id]["pentair_cloud_hub"]
+    coordinator = hass.data[DOMAIN][config_entry.entry_id]["coordinator"]
     devices: list[PentairDevice] = await hass.async_add_executor_job(hub.get_devices)
     
     # Get relay program mapping from config
@@ -33,16 +35,16 @@ async def async_setup_entry(
     for device in devices:
         # Add program entities (hidden by default for diagnostics)
         for program in device.programs:
-            entities.append(PentairProgramLight(_LOGGER, hub, device, program))
+            entities.append(PentairProgramLight(_LOGGER, hub, device, program, coordinator))
             
         # Create light entity for pool lights
-        entities.append(PentairRelayLight(_LOGGER, hub, device, lights_program))
+        entities.append(PentairRelayLight(_LOGGER, hub, device, lights_program, coordinator))
     
     _LOGGER.info(f"Setting up {len(entities)} light entities")
     async_add_entities(entities, update_before_add=True)
 
 
-class PentairProgramLight(LightEntity):
+class PentairProgramLight(CoordinatorEntity, LightEntity):
     """Representation of a Pentair program as a light (hidden by default)."""
     
     _attr_color_mode = ColorMode.ONOFF
@@ -55,8 +57,10 @@ class PentairProgramLight(LightEntity):
         hub: PentairCloudHub,
         device: PentairDevice,
         program: PentairPumpProgram,
+        coordinator,
     ) -> None:
         """Initialize the program light."""
+        super().__init__(coordinator)
         self._logger = logger
         self._hub = hub
         self._device = device
@@ -108,17 +112,18 @@ class PentairProgramLight(LightEntity):
         )
         self._is_on = False
 
-    def update(self) -> None:
-        """Update the program state."""
-        self._hub.update_pentair_devices_status()
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data from coordinator."""
         self._is_on = self._program.running
         if DEBUG_INFO:
             self._logger.info(
                 f"Program {self._program.id} update: running={self._is_on}"
             )
+        self.async_write_ha_state()
 
 
-class PentairRelayLight(LightEntity):
+class PentairRelayLight(CoordinatorEntity, LightEntity):
     """Representation of a Pentair pool light controlled via relay."""
     
     _attr_icon = "mdi:lightbulb"
@@ -131,8 +136,10 @@ class PentairRelayLight(LightEntity):
         hub: PentairCloudHub,
         device: PentairDevice,
         lights_program: int,
+        coordinator,
     ) -> None:
         """Initialize the relay light."""
+        super().__init__(coordinator)
         self._logger = logger
         self._hub = hub
         self._device = device
@@ -187,10 +194,9 @@ class PentairRelayLight(LightEntity):
         
         self._is_on = False
     
-    def update(self) -> None:
-        """Update the light state."""
-        self._hub.update_pentair_devices_status()
-        
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data from coordinator."""
         # Check if lights program is active
         for program in self._device.programs:
             if program.id == self._lights_program:
@@ -201,3 +207,5 @@ class PentairRelayLight(LightEntity):
             self._logger.info(
                 f"Pool lights program {self._lights_program} is {'active' if self._is_on else 'inactive'}"
             )
+        
+        self.async_write_ha_state()

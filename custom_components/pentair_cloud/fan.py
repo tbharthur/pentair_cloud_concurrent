@@ -12,16 +12,13 @@ from homeassistant.components.fan import (
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.exceptions import HomeAssistantError
 
 from .const import DOMAIN, DEBUG_INFO
 from .pentaircloud import PentairCloudHub, PentairDevice, PentairPumpProgram
 
 _LOGGER = logging.getLogger(__name__)
-
-# Poll every 30 seconds to update state
-SCAN_INTERVAL = timedelta(seconds=30)
 
 PRESET_MODES = {
     "off": 0,
@@ -69,14 +66,14 @@ async def async_setup_entry(
     async_add_entities(entities, True)
 
 
-class PentairPumpFan(FanEntity):
+class PentairPumpFan(CoordinatorEntity, FanEntity):
     """Pentair pump fan entity with heater safety."""
     
     def __init__(self, hub: PentairCloudHub, device: PentairDevice, coordinator, hass: HomeAssistant, program_mappings: dict):
         """Initialize the fan."""
+        super().__init__(coordinator)
         self._hub = hub
         self._device = device
-        self._coordinator = coordinator
         self.hass = hass
         self._program_mappings = program_mappings  # Store the actual program mappings from config
         self._attr_unique_id = f"pentair_pump_{device.pentair_device_id}"
@@ -109,9 +106,6 @@ class PentairPumpFan(FanEntity):
         
         # Update state from device
         self._update_state_from_device()
-        
-        # Store unsub callback for cleanup
-        self._unsub_timer = None
     
     @property
     def unique_id(self) -> str:
@@ -481,38 +475,8 @@ class PentairPumpFan(FanEntity):
             _LOGGER.info("Heater turned on - increasing pump speed to minimum 50%")
             asyncio.create_task(self.async_set_percentage(50))
     
-    async def async_added_to_hass(self) -> None:
-        """When entity is added to hass, start polling."""
-        await super().async_added_to_hass()
-        
-        # Schedule periodic updates every 30 seconds
-        self._unsub_timer = async_track_time_interval(
-            self.hass,
-            self._async_scheduled_update,
-            SCAN_INTERVAL
-        )
-        _LOGGER.info(f"Started polling for {self._attr_name} every {SCAN_INTERVAL.total_seconds()} seconds")
-    
-    async def async_will_remove_from_hass(self) -> None:
-        """When entity is removed from hass, stop polling."""
-        if self._unsub_timer:
-            self._unsub_timer()
-            self._unsub_timer = None
-        await super().async_will_remove_from_hass()
-    
-    async def _async_scheduled_update(self, now=None) -> None:
-        """Update entity state on schedule."""
-        try:
-            if DEBUG_INFO:
-                _LOGGER.debug(f"Scheduled update for {self._attr_name}")
-            
-            # Update device status from API
-            await self.hass.async_add_executor_job(
-                self._hub.update_pentair_devices_status
-            )
-            
-            # Update our state from the device
-            self._update_state_from_device()
-            self.async_write_ha_state()
-        except Exception as e:
-            _LOGGER.error(f"Error during scheduled update: {e}")
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data from coordinator."""
+        self._update_state_from_device()
+        self.async_write_ha_state()

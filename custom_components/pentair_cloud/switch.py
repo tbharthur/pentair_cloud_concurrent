@@ -7,8 +7,9 @@ from typing import Any
 
 from homeassistant.components.switch import SwitchEntity, SwitchDeviceClass
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, DEBUG_INFO
 from .pentaircloud_modified import PentairCloudHub, PentairDevice
@@ -28,6 +29,7 @@ async def async_setup_entry(
 ) -> None:
     """Set up Pentair relay switches."""
     hub = hass.data[DOMAIN][config_entry.entry_id]["pentair_cloud_hub"]
+    coordinator = hass.data[DOMAIN][config_entry.entry_id]["coordinator"]
     devices: list[PentairDevice] = await hass.async_add_executor_job(hub.get_devices)
     
     # Get relay program mappings from config
@@ -40,13 +42,13 @@ async def async_setup_entry(
     
     for device in devices:
         # Only create heater switch (lights are handled as light entity)
-        entities.append(PentairRelaySwitch(_LOGGER, hub, device, "heater", 2, relay_programs))
+        entities.append(PentairRelaySwitch(_LOGGER, hub, device, "heater", 2, relay_programs, coordinator))
     
     _LOGGER.info(f"Setting up {len(entities)} switch entities")
     async_add_entities(entities, update_before_add=True)
 
 
-class PentairRelaySwitch(SwitchEntity):
+class PentairRelaySwitch(CoordinatorEntity, SwitchEntity):
     """Representation of a Pentair relay switch."""
     
     def __init__(
@@ -57,8 +59,10 @@ class PentairRelaySwitch(SwitchEntity):
         relay_name: str,
         relay_number: int,
         relay_programs: dict[str, int],
+        coordinator,
     ) -> None:
         """Initialize the relay switch."""
+        super().__init__(coordinator)
         self._logger = logger
         self._hub = hub
         self._device = device
@@ -183,10 +187,9 @@ class PentairRelaySwitch(SwitchEntity):
         
         self._is_on = False
     
-    def update(self) -> None:
-        """Update the relay state."""
-        self._hub.update_pentair_devices_status()
-        
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data from coordinator."""
         # Check if this relay's program is active
         relay_program_id = self._relay_programs[self._relay_name]
         
@@ -200,3 +203,5 @@ class PentairRelaySwitch(SwitchEntity):
             self._logger.info(
                 f"Relay {self._relay_name} program {relay_program_id} is {'active' if self._is_on else 'inactive'}"
             )
+        
+        self.async_write_ha_state()
