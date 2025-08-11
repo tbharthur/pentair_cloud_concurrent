@@ -73,7 +73,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN][entry.entry_id] = {
         "pentair_cloud_hub": hub,  # Keep for backward compatibility
         "hub": hub,  # New consistent key
-        "coordinator": None,  # Will be set by platforms if needed
+        "coordinator": None,  # Not used currently but kept for compatibility
         "pump_fan": None  # Will be set by fan platform
     }
 
