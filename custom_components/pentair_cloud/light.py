@@ -197,15 +197,17 @@ class PentairRelayLight(CoordinatorEntity, LightEntity):
     @callback
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from coordinator."""
-        # Check if lights program is active
-        for program in self._device.programs:
-            if program.id == self._lights_program:
-                self._is_on = program.running  # This checks e10 = 3
-                break
+        # Use actual relay state from API (s21 for relay1/lights)
+        self._is_on = getattr(self._device, 'relay1_on', False)
         
         if DEBUG_INFO:
-            self._logger.info(
-                f"Pool lights program {self._lights_program} is {'active' if self._is_on else 'inactive'}"
-            )
+            # Also check program state for debugging
+            for program in self._device.programs:
+                if program.id == self._lights_program:
+                    self._logger.debug(
+                        f"Lights relay physical state: {self._is_on}, "
+                        f"program {self._lights_program} running: {program.running}"
+                    )
+                    break
         
         self.async_write_ha_state()

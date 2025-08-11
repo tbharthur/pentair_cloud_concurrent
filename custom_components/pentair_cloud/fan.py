@@ -418,37 +418,90 @@ class PentairPumpFan(CoordinatorEntity, FanEntity):
     
     def _update_state_from_device(self) -> None:
         """Update entity state from device programs."""
-        # Check which program is running using the actual mapped programs
-        pump_running = False
+        
+        # Get actual pump status from API fields
+        motor_rpm = getattr(self._device, 'motor_speed', 0)  # Already converted from s19/10
+        power_watts = getattr(self._device, 'power', 0)  # s18 field
+        flow_rate = getattr(self._device, 'flow_rate', 0)  # s26/10
         
         if DEBUG_INFO:
-            running_programs = [p.id for p in self._device.programs if p.running]
+            _LOGGER.debug(f"API Status - Motor: {motor_rpm} RPM, Power: {power_watts}W, Flow: {flow_rate} GPM")
+            _LOGGER.debug(f"Relay states - Relay1 (lights): {self._device.relay1_on}, Relay2 (heater): {self._device.relay2_on}")
+            running_programs = [(p.id, p.name) for p in self._device.programs if p.running]
             if running_programs:
                 _LOGGER.debug(f"Running programs: {running_programs}")
         
-        for program in self._device.programs:
-            if program.running:
-                if program.id in self._program_to_speed:
-                    # This is a pump speed program
-                    speed = self._program_to_speed[program.id]
-                    self._attr_percentage = speed
-                    self._attr_is_on = True
-                    self._update_preset_mode(speed)
-                    pump_running = True
-                    if DEBUG_INFO:
-                        _LOGGER.debug(f"Pump running program {program.id} ({program.name}) at {speed}%")
-                    break  # Only one pump program should be active
-                else:
-                    if DEBUG_INFO:
-                        _LOGGER.debug(f"Program {program.id} ({program.name}) is running but is not a pump speed program")
+        # Determine if pump is running based on motor speed or power draw
+        pump_is_running = motor_rpm > 0 or power_watts > 10  # 10W threshold for noise
         
-        if not pump_running:
-            # No pump speed programs running
+        if pump_is_running:
+            self._attr_is_on = True
+            
+            # Convert RPM to percentage (typical pump range 1000-3450 RPM)
+            # Adjust these values based on your specific pump model
+            MIN_RPM = 1000
+            MAX_RPM = 3450
+            
+            if motor_rpm > 0:
+                # Calculate percentage from actual RPM
+                percentage = int(((motor_rpm - MIN_RPM) / (MAX_RPM - MIN_RPM)) * 100)
+                percentage = max(0, min(100, percentage))  # Clamp to 0-100
+                self._attr_percentage = percentage
+                
+                # Update preset mode based on actual speed
+                self._update_preset_mode(percentage)
+                
+                _LOGGER.info(f"Pump ON at {motor_rpm} RPM ({percentage}%), {power_watts}W, {flow_rate} GPM")
+            else:
+                # Pump is on but no RPM data (shouldn't happen normally)
+                self._attr_percentage = 50
+                self._attr_preset_mode = "medium"
+                _LOGGER.warning(f"Pump ON (detected by power {power_watts}W) but no RPM data")
+            
+            # Log which program is controlling it (for information only)
+            for program in self._device.programs:
+                if program.running:
+                    if program.id in self._program_to_speed:
+                        _LOGGER.debug(f"Running via configured program {program.id} ({program.name})")
+                    else:
+                        _LOGGER.debug(f"Running via program {program.id} ({program.name})")
+        else:
+            # Pump is off
             self._attr_percentage = 0
             self._attr_is_on = False
             self._attr_preset_mode = "off"
             if DEBUG_INFO:
-                _LOGGER.debug("No pump speed programs running - pump is OFF")
+                _LOGGER.debug("Pump is OFF (no motor speed or power draw)")
+    
+    @property
+    def extra_state_attributes(self):
+        """Return additional state attributes."""
+        attrs = {}
+        
+        # Add actual pump metrics
+        if hasattr(self._device, 'motor_speed'):
+            attrs['motor_rpm'] = self._device.motor_speed
+        if hasattr(self._device, 'power'):
+            attrs['power_watts'] = self._device.power
+        if hasattr(self._device, 'flow_rate'):
+            attrs['flow_gpm'] = self._device.flow_rate
+        
+        # Add relay states
+        if hasattr(self._device, 'relay1_on'):
+            attrs['lights_on'] = self._device.relay1_on
+        if hasattr(self._device, 'relay2_on'):
+            attrs['heater_on'] = self._device.relay2_on
+        
+        # Add active program info
+        if hasattr(self._device, 'active_pump_program'):
+            attrs['active_program'] = self._device.active_pump_program
+        
+        # Show which programs are running
+        running_programs = [f"{p.id}:{p.name}" for p in self._device.programs if p.running]
+        if running_programs:
+            attrs['running_programs'] = ", ".join(running_programs)
+        
+        return attrs
     
     async def _notify_safety_override(self, requested: int, actual: int) -> None:
         """Notify user when speed is adjusted for safety."""

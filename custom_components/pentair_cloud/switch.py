@@ -190,13 +190,21 @@ class PentairRelaySwitch(CoordinatorEntity, SwitchEntity):
     @callback
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from coordinator."""
-        # Check if this relay's program is active
-        relay_program_id = self._relay_programs[self._relay_name]
+        # Use actual relay state from API (s21 for relay1/lights, s22 for relay2/heater)
+        if self._relay_number == 1:
+            self._is_on = getattr(self._device, 'relay1_on', False)
+        elif self._relay_number == 2:
+            self._is_on = getattr(self._device, 'relay2_on', False)
         
-        # Find the program and check if it's active
-        for program in self._device.programs:
-            if program.id == relay_program_id:
-                self._is_on = program.running  # This checks e10 = 3
+        if DEBUG_INFO:
+            # Also log the program state for debugging
+            relay_program_id = self._relay_programs[self._relay_name]
+            for program in self._device.programs:
+                if program.id == relay_program_id:
+                    _LOGGER.debug(
+                        f"{self._relay_name} relay physical state: {self._is_on}, "
+                        f"program {relay_program_id} running: {program.running}"
+                    )
                 break
         
         if DEBUG_INFO:
