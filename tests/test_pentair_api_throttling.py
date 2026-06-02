@@ -173,3 +173,38 @@ def test_climate_uses_coordinator_instead_of_direct_polling():
     assert "CoordinatorEntity" in climate
     assert "def update(self)" not in climate
     assert "self._hub.update_pentair_devices_status()" not in climate
+
+
+def test_fan_exposes_slider_without_homekit_preset_switches():
+    fan = Path("custom_components/pentair_cloud/fan.py").read_text()
+
+    assert "FanEntityFeature.SET_SPEED" in fan
+    assert "FanEntityFeature.PRESET_MODE" not in fan
+    assert "def preset_modes" not in fan
+    assert "def preset_mode" not in fan
+
+
+def test_fan_slider_snaps_to_real_pentair_speed_programs():
+    fan = Path("custom_components/pentair_cloud/fan.py").read_text()
+
+    assert "SLIDER_DEBOUNCE_SECONDS = 2.0" in fan
+    assert "SPEED_STEPS = (0, 25, 50, 75, 100)" in fan
+    assert "def _snap_requested_speed" in fan
+    assert "actual_speed = self._snap_requested_speed(speed)" in fan
+
+
+def test_raw_pentair_program_lights_are_not_created():
+    light = Path("custom_components/pentair_cloud/light.py").read_text()
+
+    assert "for program in device.programs:" not in light
+    assert "PentairProgramLight(" not in light
+
+
+def test_pool_thermostat_starts_pump_before_heater_program():
+    climate = Path("custom_components/pentair_cloud/climate.py").read_text()
+
+    pump_start = climate.index("await self._pump_fan.async_set_percentage(50)")
+    heater_start = climate.index("self._hub.activate_program_concurrent", pump_start)
+
+    assert "self._pump_fan.update_heater_state(True)" in climate
+    assert pump_start < heater_start

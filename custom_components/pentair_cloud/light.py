@@ -8,11 +8,10 @@ from homeassistant.components.light import LightEntity, ColorMode
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, DEBUG_INFO
-from .pentaircloud_modified import PentairCloudHub, PentairDevice, PentairPumpProgram
+from .pentaircloud_modified import PentairCloudHub, PentairDevice
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -33,94 +32,12 @@ async def async_setup_entry(
     entities = []
     
     for device in devices:
-        # Add program entities (hidden by default for diagnostics)
-        for program in device.programs:
-            entities.append(PentairProgramLight(_LOGGER, hub, device, program, coordinator))
-            
-        # Create light entity for pool lights
+        # Create the single user-facing pool light entity. Raw Pentair programs
+        # stay internal so HomeKit does not expose each program as a switch.
         entities.append(PentairRelayLight(_LOGGER, hub, device, lights_program, coordinator))
     
     _LOGGER.info(f"Setting up {len(entities)} light entities")
     async_add_entities(entities, update_before_add=True)
-
-
-class PentairProgramLight(CoordinatorEntity, LightEntity):
-    """Representation of a Pentair program as a light (hidden by default)."""
-    
-    _attr_color_mode = ColorMode.ONOFF
-    _attr_supported_color_modes = {ColorMode.ONOFF}
-    _attr_entity_category = EntityCategory.DIAGNOSTIC  # Hide by default
-
-    def __init__(
-        self,
-        logger: logging.Logger,
-        hub: PentairCloudHub,
-        device: PentairDevice,
-        program: PentairPumpProgram,
-        coordinator,
-    ) -> None:
-        """Initialize the program light."""
-        super().__init__(coordinator)
-        self._logger = logger
-        self._hub = hub
-        self._device = device
-        self._program = program
-        self._attr_name = f"{device.nickname} - {program.name} (Program)"
-        self._attr_unique_id = f"pentair_{device.pentair_device_id}_{program.id}"
-        self._is_on = program.running
-        
-        if DEBUG_INFO:
-            self._logger.info(f"Pentair Cloud Program {self._attr_name} Configured")
-
-    @property
-    def device_info(self):
-        """Return device info."""
-        return {
-            "identifiers": {
-                (DOMAIN, f"pentair_{self._device.pentair_device_id}")
-            },
-            "name": self._device.nickname,
-            "model": self._device.nickname,
-            "sw_version": "1.0",
-            "manufacturer": "Pentair",
-        }
-
-    @property
-    def is_on(self) -> bool:
-        """Return true if the program is running."""
-        return self._is_on
-
-    def turn_on(self, **kwargs) -> None:
-        """Turn on the program."""
-        if DEBUG_INFO:
-            self._logger.info(
-                f"Activating program {self._program.id} on device {self._device.pentair_device_id}"
-            )
-        self._hub.activate_program_concurrent(
-            self._device.pentair_device_id, self._program.id
-        )
-        self._is_on = True
-
-    def turn_off(self, **kwargs) -> None:
-        """Turn off the program."""
-        if DEBUG_INFO:
-            self._logger.info(
-                f"Deactivating program {self._program.id} on device {self._device.pentair_device_id}"
-            )
-        self._hub.deactivate_program(
-            self._device.pentair_device_id, self._program.id
-        )
-        self._is_on = False
-
-    @callback
-    def _handle_coordinator_update(self) -> None:
-        """Handle updated data from coordinator."""
-        self._is_on = self._program.running
-        if DEBUG_INFO:
-            self._logger.info(
-                f"Program {self._program.id} update: running={self._is_on}"
-            )
-        self.async_write_ha_state()
 
 
 class PentairRelayLight(CoordinatorEntity, LightEntity):

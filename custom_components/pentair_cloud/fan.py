@@ -1,7 +1,6 @@
 """Fan platform for Pentair pump control with heater safety."""
 import logging
-from typing import Any, Optional, List
-from datetime import datetime, timedelta
+from typing import Optional
 import asyncio
 import time
 
@@ -20,13 +19,8 @@ from .pentaircloud import PentairCloudHub, PentairDevice, PentairPumpProgram
 
 _LOGGER = logging.getLogger(__name__)
 
-PRESET_MODES = {
-    "off": 0,
-    "low": 30,
-    "medium": 50,
-    "high": 75,
-    "max": 100
-}
+SPEED_STEPS = (0, 25, 50, 75, 100)
+SLIDER_DEBOUNCE_SECONDS = 2.0
 
 # Note: Actual program mappings come from config_entry.data
 # The old hardcoded SPEED_TO_PROGRAM and PROGRAM_TO_SPEED have been removed
@@ -81,7 +75,7 @@ class PentairPumpFan(CoordinatorEntity, FanEntity):
         
         # Create reverse mapping for state updates
         self._program_to_speed = {
-            program_mappings["low"]: 30,
+            program_mappings["low"]: 25,
             program_mappings["medium"]: 50,
             program_mappings["high"]: 75,
             program_mappings["max"]: 100,
@@ -93,8 +87,6 @@ class PentairPumpFan(CoordinatorEntity, FanEntity):
         # State tracking
         self._attr_is_on = False
         self._attr_percentage = 0
-        self._attr_preset_mode = "off"
-        
         # Debounce tracking
         self._pending_speed_change = None
         self._last_speed_change = time.time()
@@ -140,23 +132,12 @@ class PentairPumpFan(CoordinatorEntity, FanEntity):
         return 4  # Low, Medium, High, Max
     
     @property
-    def preset_modes(self) -> List[str]:
-        """Return available preset modes."""
-        return list(PRESET_MODES.keys())
-    
-    @property
-    def preset_mode(self) -> Optional[str]:
-        """Return current preset mode."""
-        return self._attr_preset_mode
-    
-    @property
     def supported_features(self) -> int:
         """Return supported features."""
         # As of HA 2024.8, TURN_ON and TURN_OFF must be explicitly declared
         return (
             FanEntityFeature.TURN_ON
             | FanEntityFeature.TURN_OFF
-            | FanEntityFeature.PRESET_MODE 
             | FanEntityFeature.SET_SPEED
         )
     
@@ -195,6 +176,10 @@ class PentairPumpFan(CoordinatorEntity, FanEntity):
         
         self._minimum_speed_override = False
         return requested_speed
+
+    def _snap_requested_speed(self, speed: int) -> int:
+        """Snap HomeKit/HA slider values to the configured Pentair program steps."""
+        return min(SPEED_STEPS, key=lambda step: (abs(step - speed), step))
     
     async def async_set_percentage(self, percentage: int) -> None:
         """Set pump speed with debouncing and heater safety."""
@@ -229,8 +214,9 @@ class PentairPumpFan(CoordinatorEntity, FanEntity):
     async def _debounced_speed_change(self, speed: int) -> None:
         """Execute speed change after debounce delay."""
         try:
-            # Wait for slider to settle (reduced to 0.5 seconds for better responsiveness)
-            await asyncio.sleep(0.5)
+            # HomeKit sends intermediate values while swiping. Wait for the
+            # release value so we do not start an unintended lower-speed program.
+            await asyncio.sleep(SLIDER_DEBOUNCE_SECONDS)
             
             # Only execute if this is still the latest request
             if self._pending_speed_change == speed:
@@ -243,22 +229,19 @@ class PentairPumpFan(CoordinatorEntity, FanEntity):
         _LOGGER.info(f"Executing pump speed change to {speed}%")
         
         try:
+            actual_speed = self._snap_requested_speed(speed)
+
             # Map speed percentage to appropriate program using actual config mappings
-            if speed == 0:
+            if actual_speed == 0:
                 target_program_id = None
-                actual_speed = 0
-            elif speed <= 30:
+            elif actual_speed == 25:
                 target_program_id = self._program_mappings["low"]
-                actual_speed = 30  # Actual speed is 30%
-            elif speed <= 50:
+            elif actual_speed == 50:
                 target_program_id = self._program_mappings["medium"]
-                actual_speed = 50  # Actual speed is 50%
-            elif speed <= 75:
+            elif actual_speed == 75:
                 target_program_id = self._program_mappings["high"]
-                actual_speed = 75  # Actual speed is 75%
             else:
                 target_program_id = self._program_mappings["max"]
-                actual_speed = 100  # Actual speed is 100%
             
             _LOGGER.info(f"Mapped {speed}% to program {target_program_id} with actual speed {actual_speed}%")
             
@@ -289,7 +272,6 @@ class PentairPumpFan(CoordinatorEntity, FanEntity):
                     # Set the actual speed, not the requested speed
                     self._attr_percentage = actual_speed
                     self._attr_is_on = True
-                    self._update_preset_mode(actual_speed)
                     _LOGGER.info(f"Successfully set pump to {actual_speed}%")
                 else:
                     _LOGGER.error(f"Failed to start program {target_program_id}")
@@ -299,7 +281,6 @@ class PentairPumpFan(CoordinatorEntity, FanEntity):
                 # Speed is 0, pump is off
                 self._attr_percentage = 0
                 self._attr_is_on = False
-                self._attr_preset_mode = "off"
                 _LOGGER.info("Pump turned off")
             
             # Force immediate status update
@@ -319,17 +300,18 @@ class PentairPumpFan(CoordinatorEntity, FanEntity):
         except Exception as e:
             _LOGGER.error(f"Error executing speed change: {e}")
     
-    async def async_set_preset_mode(self, preset_mode: str) -> None:
-        """Set pump to preset mode."""
-        speed = PRESET_MODES.get(preset_mode, 0)
-        await self.async_set_percentage(speed)
-    
     async def async_turn_on(self, percentage: Optional[int] = None, preset_mode: Optional[str] = None, **kwargs) -> None:
         """Turn on pump."""
         _LOGGER.info(f"Turning on pump with percentage={percentage}, preset_mode={preset_mode}")
         
         if preset_mode is not None:
-            await self.async_set_preset_mode(preset_mode)
+            preset_speed = {
+                "low": 25,
+                "medium": 50,
+                "high": 75,
+                "max": 100,
+            }.get(preset_mode, 50)
+            await self.async_set_percentage(preset_speed)
         elif percentage is not None:
             # Ensure we use a valid speed
             if percentage > 0:
@@ -391,7 +373,6 @@ class PentairPumpFan(CoordinatorEntity, FanEntity):
             # Update state only if all stops succeeded
             self._attr_percentage = 0
             self._attr_is_on = False
-            self._attr_preset_mode = "off"
             
             # Force status update
             await self.hass.async_add_executor_job(
@@ -402,19 +383,6 @@ class PentairPumpFan(CoordinatorEntity, FanEntity):
             
         except Exception as e:
             _LOGGER.error(f"Error turning off pump: {e}")
-    
-    def _update_preset_mode(self, speed: int) -> None:
-        """Update preset mode based on speed."""
-        if speed >= 100:
-            self._attr_preset_mode = "max"
-        elif speed >= 75:
-            self._attr_preset_mode = "high"
-        elif speed >= 50:
-            self._attr_preset_mode = "medium"
-        elif speed >= 30:
-            self._attr_preset_mode = "low"
-        else:
-            self._attr_preset_mode = "off"
     
     def _update_state_from_device(self) -> None:
         """Update entity state from device programs."""
@@ -436,6 +404,14 @@ class PentairPumpFan(CoordinatorEntity, FanEntity):
         
         if pump_is_running:
             self._attr_is_on = True
+
+            if self._device.active_pump_program in self._program_to_speed:
+                self._attr_percentage = self._program_to_speed[self._device.active_pump_program]
+                _LOGGER.info(
+                    f"Pump ON via program {self._device.active_pump_program} "
+                    f"({self._attr_percentage}%), {motor_rpm} RPM, {power_watts}W, {flow_rate} GPM"
+                )
+                return
             
             # Convert RPM to percentage (typical pump range 1000-3450 RPM)
             # Adjust these values based on your specific pump model
@@ -446,16 +422,12 @@ class PentairPumpFan(CoordinatorEntity, FanEntity):
                 # Calculate percentage from actual RPM
                 percentage = int(((motor_rpm - MIN_RPM) / (MAX_RPM - MIN_RPM)) * 100)
                 percentage = max(0, min(100, percentage))  # Clamp to 0-100
-                self._attr_percentage = percentage
+                self._attr_percentage = self._snap_requested_speed(percentage)
                 
-                # Update preset mode based on actual speed
-                self._update_preset_mode(percentage)
-                
-                _LOGGER.info(f"Pump ON at {motor_rpm} RPM ({percentage}%), {power_watts}W, {flow_rate} GPM")
+                _LOGGER.info(f"Pump ON at {motor_rpm} RPM ({self._attr_percentage}%), {power_watts}W, {flow_rate} GPM")
             else:
                 # Pump is on but no RPM data (shouldn't happen normally)
                 self._attr_percentage = 50
-                self._attr_preset_mode = "medium"
                 _LOGGER.warning(f"Pump ON (detected by power {power_watts}W) but no RPM data")
             
             # Log which program is controlling it (for information only)
@@ -469,7 +441,6 @@ class PentairPumpFan(CoordinatorEntity, FanEntity):
             # Pump is off
             self._attr_percentage = 0
             self._attr_is_on = False
-            self._attr_preset_mode = "off"
             if DEBUG_INFO:
                 _LOGGER.debug("Pump is OFF (no motor speed or power draw)")
     
