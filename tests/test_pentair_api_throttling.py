@@ -208,3 +208,10 @@ def test_pool_thermostat_starts_pump_before_heater_program():
 
     assert "self._pump_fan.update_heater_state(True)" in climate
     assert pump_start < heater_start
+
+
+def test_heater_program_is_not_exposed_as_duplicate_homekit_switch():
+    switch = Path("custom_components/pentair_cloud/switch.py").read_text()
+
+    assert 'entities.append(PentairRelaySwitch(_LOGGER, hub, device, "heater"' not in switch
+    assert "update_pentair_devices_status" not in switch
