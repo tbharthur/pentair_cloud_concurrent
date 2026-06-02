@@ -16,6 +16,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.restore_state import RestoreEntity
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, DEBUG_INFO
 from .pentaircloud_modified import PentairCloudHub, PentairDevice
@@ -42,6 +43,7 @@ async def async_setup_entry(
         return
     
     hub = hass.data[DOMAIN][config_entry.entry_id]["pentair_cloud_hub"]
+    coordinator = hass.data[DOMAIN][config_entry.entry_id]["coordinator"]
     devices: list[PentairDevice] = await hass.async_add_executor_job(hub.get_devices)
     
     # Get heater program from config
@@ -60,7 +62,8 @@ async def async_setup_entry(
                 device, 
                 heater_program,
                 temperature_sensor,
-                pump_fan
+                pump_fan,
+                coordinator
             )
         )
     
@@ -68,9 +71,10 @@ async def async_setup_entry(
     async_add_entities(entities, update_before_add=True)
 
 
-class PentairPoolHeater(ClimateEntity, RestoreEntity):
+class PentairPoolHeater(CoordinatorEntity, ClimateEntity, RestoreEntity):
     """Representation of a Pentair pool heater."""
     
+    _attr_should_poll = False
     _attr_hvac_modes = [HVACMode.OFF, HVACMode.HEAT]
     _attr_supported_features = ClimateEntityFeature.TARGET_TEMPERATURE
     _attr_temperature_unit = UnitOfTemperature.FAHRENHEIT
@@ -86,8 +90,10 @@ class PentairPoolHeater(ClimateEntity, RestoreEntity):
         heater_program: int,
         temperature_sensor: str,
         pump_fan=None,
+        coordinator=None,
     ) -> None:
         """Initialize the pool heater."""
+        super().__init__(coordinator)
         self._logger = logger
         self._hub = hub
         self._device = device
@@ -230,6 +236,14 @@ class PentairPoolHeater(ClimateEntity, RestoreEntity):
         
         if DEBUG_INFO:
             self._logger.info(f"Pool heater turned OFF")
+
+    def _sync_heater_state_from_device(self) -> None:
+        """Update heater state from the latest coordinator device snapshot."""
+        for program in self._device.programs:
+            if program.id == self._heater_program:
+                self._heater_on = program.running
+                self._is_heating = program.running and self._hvac_mode == HVACMode.HEAT
+                break
     
     @property
     def device_info(self):
@@ -279,13 +293,8 @@ class PentairPoolHeater(ClimateEntity, RestoreEntity):
         await self._async_control_heater()
         self.async_write_ha_state()
     
-    def update(self) -> None:
-        """Update heater state."""
-        self._hub.update_pentair_devices_status()
-        
-        # Check if heater program is active
-        for program in self._device.programs:
-            if program.id == self._heater_program:
-                self._heater_on = program.running
-                self._is_heating = program.running and self._hvac_mode == HVACMode.HEAT
-                break
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data from coordinator."""
+        self._sync_heater_state_from_device()
+        self.async_write_ha_state()

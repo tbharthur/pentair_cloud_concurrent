@@ -20,7 +20,7 @@ PENTAIR_USER_PROFILE_PATH = "/user/user-service/common/profilev2"
 PENTAIR_DEVICES_PATH = "/device/device-service/user/devices"
 PENTAIR_DEVICES_2_PATH = "/device2/device2-service/user/device"
 PENTAIR_DEVICE_SERVICE_PATH = "/device/device-service/user/device/"
-UPDATE_MIN_SECONDS = 10  # Minimum time between two update requests - reduced from 60
+UPDATE_MIN_SECONDS = 60  # Minimum time between two status update requests
 PROGRAM_START_MIN_SECONDS = 5  # Reduced for concurrent activation
 DEBOUNCE_SECONDS = 2  # Debounce delay for rapid command changes
 
@@ -128,13 +128,23 @@ class PentairCloudHub:
     def get_devices(self) -> list[PentairDevice]:
         return self.devices
 
-    def populate_AWS_token(self) -> None:
+    def populate_AWS_token(self) -> bool:
+        """Refresh the cached Cognito ID token without calling GetUser.
+
+        pycognito.check_token() refreshes tokens when needed and stores the
+        current ID token on the client. Calling get_user() on every poll makes a
+        separate Cognito GetUser request and has been triggering rate limits.
+        """
         if self.cognito_client is not None:
+            previous_token = self.AWS_TOKEN
             self.cognito_client.check_token()
-            new_token = self.cognito_client.get_user()._metadata["id_token"]
-            if self.AWS_TOKEN != new_token:  # Token has been refreshed
-                self.AWS_TOKEN = new_token
-                self.populate_AWS_and_data_fields()
+            new_token = getattr(self.cognito_client, "id_token", None)
+            if not new_token:
+                self.LOGGER.error("Exception while refreshing Pentair Cloud token (empty id token).")
+                return False
+            self.AWS_TOKEN = new_token
+            return previous_token != new_token
+        return False
 
     def populate_AWS_and_data_fields(self) -> None:
         if self.AWS_TOKEN is None:
@@ -190,10 +200,11 @@ class PentairCloudHub:
                     auth=self.get_AWS_auth(),
                     headers=self.get_pentair_header(),
                 )
+                devices = []
                 for device in response.json()["data"]:
                     if device["deviceType"] == "IF31":
                         if device["status"] == "ACTIVE":
-                            self.devices.append(
+                            devices.append(
                                 PentairDevice(
                                     self.LOGGER,
                                     device["deviceId"],
@@ -217,6 +228,7 @@ class PentairCloudHub:
                                 + "/"
                                 + device["pname"]
                             )
+                self.devices = devices
                 self.update_pentair_devices_status()
             except Exception as err:
                 self.LOGGER.error(
@@ -238,6 +250,7 @@ class PentairCloudHub:
             self.last_update = time.time()
             self.populate_AWS_token()
             if self.AWS_TOKEN is not None:
+                response_data = None
                 try:
                     devices_json_list = []
                     for device in self.devices:
@@ -293,7 +306,7 @@ class PentairCloudHub:
                     )
                     try:
                         self.LOGGER.error("Timeout detected. Logging Again")
-                        if "timeout" in response_data["message"]:
+                        if response_data and "timeout" in response_data.get("message", ""):
                             self.authenticate(
                                 self.username, self.password
                             )  # Refresh authentication in case of timeout

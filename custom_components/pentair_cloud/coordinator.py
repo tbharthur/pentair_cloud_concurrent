@@ -11,8 +11,9 @@ from .pentaircloud_modified import PentairCloudHub
 
 _LOGGER = logging.getLogger(__name__)
 
-# How often to poll the Pentair API for updates
-SCAN_INTERVAL = timedelta(seconds=30)
+# How often to poll the Pentair API for updates. Pentair/Cognito rate limits are
+# easy to hit if HomeKit and HA both ask for fresh state aggressively.
+SCAN_INTERVAL = timedelta(minutes=2)
 
 
 class PentairDataUpdateCoordinator(DataUpdateCoordinator):
