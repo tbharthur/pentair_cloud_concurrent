@@ -413,15 +413,15 @@ class PentairPumpFan(CoordinatorEntity, FanEntity):
                 )
                 return
             
-            # Convert RPM to percentage (typical pump range 1000-3450 RPM)
-            # Adjust these values based on your specific pump model
-            MIN_RPM = 1000
-            MAX_RPM = 3450
-            
             if motor_rpm > 0:
-                # Calculate percentage from actual RPM
-                percentage = int(((motor_rpm - MIN_RPM) / (MAX_RPM - MIN_RPM)) * 100)
-                percentage = max(0, min(100, percentage))  # Clamp to 0-100
+                if motor_rpm <= 100:
+                    percentage = int(motor_rpm)
+                else:
+                    # Convert RPM to percentage (typical pump range 1000-3450 RPM).
+                    MIN_RPM = 1000
+                    MAX_RPM = 3450
+                    percentage = int(((motor_rpm - MIN_RPM) / (MAX_RPM - MIN_RPM)) * 100)
+                    percentage = max(0, min(100, percentage))
                 self._attr_percentage = self._snap_requested_speed(percentage)
                 
                 _LOGGER.info(f"Pump ON at {motor_rpm} RPM ({self._attr_percentage}%), {power_watts}W, {flow_rate} GPM")

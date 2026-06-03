@@ -27,14 +27,40 @@ def install_import_stubs():
     homeassistant.core = types.ModuleType("homeassistant.core")
     homeassistant.core.HomeAssistant = object
     components = types.ModuleType("homeassistant.components")
+    fan = types.ModuleType("homeassistant.components.fan")
+    fan.FanEntity = object
+    fan.FanEntityFeature = types.SimpleNamespace(TURN_ON=1, TURN_OFF=16, SET_SPEED=32)
     light = types.ModuleType("homeassistant.components.light")
     light.ATTR_BRIGHTNESS = "brightness"
     light.PLATFORM_SCHEMA = object()
     light.LightEntity = object
+    config_entries = types.ModuleType("homeassistant.config_entries")
+    config_entries.ConfigEntry = object
+    const = types.ModuleType("homeassistant.const")
+    helpers = types.ModuleType("homeassistant.helpers")
+    helpers.entity_platform = types.ModuleType("homeassistant.helpers.entity_platform")
+    helpers.entity_platform.AddEntitiesCallback = object
+    helpers.update_coordinator = types.ModuleType("homeassistant.helpers.update_coordinator")
+
+    class CoordinatorEntity:
+        def __init__(self, coordinator=None):
+            self.coordinator = coordinator
+
+    helpers.update_coordinator.CoordinatorEntity = CoordinatorEntity
+    exceptions = types.ModuleType("homeassistant.exceptions")
+    exceptions.HomeAssistantError = Exception
+    homeassistant.core.callback = lambda func: func
     sys.modules["homeassistant"] = homeassistant
     sys.modules["homeassistant.core"] = homeassistant.core
     sys.modules["homeassistant.components"] = components
+    sys.modules["homeassistant.components.fan"] = fan
     sys.modules["homeassistant.components.light"] = light
+    sys.modules["homeassistant.config_entries"] = config_entries
+    sys.modules["homeassistant.const"] = const
+    sys.modules["homeassistant.helpers"] = helpers
+    sys.modules["homeassistant.helpers.entity_platform"] = helpers.entity_platform
+    sys.modules["homeassistant.helpers.update_coordinator"] = helpers.update_coordinator
+    sys.modules["homeassistant.exceptions"] = exceptions
 
 
 class FakeLogger:
@@ -78,6 +104,26 @@ def import_pentair_module(filename="pentaircloud_modified.py"):
     sys.modules["custom_components.pentair_cloud"] = pentair_package
 
     spec = importlib.util.spec_from_file_location(module_name, root / filename)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def import_package_module(stem):
+    install_import_stubs()
+    module_name = f"custom_components.pentair_cloud.{stem}"
+    sys.modules.pop(module_name, None)
+
+    root = Path("custom_components/pentair_cloud").resolve()
+    custom_components = types.ModuleType("custom_components")
+    custom_components.__path__ = [str(root.parent)]
+    pentair_package = types.ModuleType("custom_components.pentair_cloud")
+    pentair_package.__path__ = [str(root)]
+    sys.modules["custom_components"] = custom_components
+    sys.modules["custom_components.pentair_cloud"] = pentair_package
+
+    spec = importlib.util.spec_from_file_location(module_name, root / f"{stem}.py")
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
     spec.loader.exec_module(module)
@@ -248,6 +294,34 @@ def test_fan_slider_snaps_to_real_pentair_speed_programs():
     assert "SPEED_STEPS = (0, 25, 50, 75, 100)" in fan
     assert "def _snap_requested_speed" in fan
     assert "actual_speed = self._snap_requested_speed(speed)" in fan
+
+
+def test_fan_reports_percent_speed_when_pentair_motor_speed_is_percent_like():
+    mod = import_package_module("fan")
+    device = types.SimpleNamespace(
+        nickname="Pool",
+        pentair_device_id="device-1",
+        active_pump_program=2,
+        motor_speed=50.0,
+        power=423,
+        flow_rate=35.4,
+        relay1_on=False,
+        relay2_on=True,
+        programs=[
+            types.SimpleNamespace(id=6, name="Heater", running=True),
+        ],
+    )
+
+    fan = mod.PentairPumpFan(
+        hub=types.SimpleNamespace(),
+        device=device,
+        coordinator=None,
+        hass=types.SimpleNamespace(),
+        program_mappings={"low": 3, "medium": 7, "high": 4, "max": 5},
+    )
+
+    assert fan.is_on is True
+    assert fan.percentage == 50
 
 
 def test_raw_pentair_program_lights_are_not_created():
