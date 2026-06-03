@@ -99,6 +99,63 @@ def test_token_refresh_uses_cached_id_token_without_get_user():
         assert hub.cognito_client.get_user_calls == 0
 
 
+def test_status_update_refreshes_aws_credentials_when_id_token_changes(monkeypatch):
+    for filename in ["pentaircloud_modified.py", "pentaircloud.py"]:
+        mod = import_pentair_module(filename)
+        logger = FakeLogger()
+        hub = mod.PentairCloudHub(logger)
+        hub.cognito_client = FakeCognitoClient()
+        hub.AWS_TOKEN = "stale-id-token"
+        hub.AWS_IDENTITY_ID = "stale-identity"
+        hub.AWS_ACCESS_KEY_ID = "stale-key"
+        hub.AWS_SECRET_ACCESS_KEY = "stale-secret"
+        hub.AWS_SESSION_TOKEN = "stale-session"
+        hub.devices = [mod.PentairDevice(logger, "device-1", "Pump")]
+
+        class CognitoIdentityClient:
+            def get_id(self, **kwargs):
+                token = next(iter(kwargs["Logins"].values()))
+                assert token == "fresh-id-token"
+                return {"IdentityId": "fresh-identity"}
+
+            def get_credentials_for_identity(self, **kwargs):
+                token = next(iter(kwargs["Logins"].values()))
+                assert kwargs["IdentityId"] == "fresh-identity"
+                assert token == "fresh-id-token"
+                return {
+                    "Credentials": {
+                        "AccessKeyId": "fresh-key",
+                        "SecretKey": "fresh-secret",
+                        "SessionToken": "fresh-session",
+                    }
+                }
+
+        class StatusResponse:
+            def json(self):
+                return {"response": {"data": []}}
+
+        captured = {}
+
+        def post_status(*args, **kwargs):
+            captured["auth"] = kwargs["auth"]
+            captured["headers"] = kwargs["headers"]
+            return StatusResponse()
+
+        monkeypatch.setattr(mod.boto3, "client", lambda *args, **kwargs: CognitoIdentityClient())
+        monkeypatch.setattr(mod.requests, "post", post_status)
+
+        hub.update_pentair_devices_status()
+
+        assert hub.AWS_TOKEN == "fresh-id-token"
+        assert hub.AWS_ACCESS_KEY_ID == "fresh-key"
+        assert hub.AWS_SECRET_ACCESS_KEY == "fresh-secret"
+        assert hub.AWS_SESSION_TOKEN == "fresh-session"
+        assert captured["headers"]["x-amz-id-token"] == "fresh-id-token"
+        assert captured["auth"][1][0] == "fresh-key"
+        assert captured["auth"][1][1] == "fresh-secret"
+        assert captured["auth"][2]["session_token"] == "fresh-session"
+
+
 def test_status_update_logs_api_json_errors_without_unbound_response_data(monkeypatch):
     for filename in ["pentaircloud_modified.py", "pentaircloud.py"]:
         mod = import_pentair_module(filename)

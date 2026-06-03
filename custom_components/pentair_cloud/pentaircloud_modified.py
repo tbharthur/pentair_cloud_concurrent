@@ -8,6 +8,7 @@ from requests_aws4auth import AWS4Auth
 from homeassistant.components.light import ATTR_BRIGHTNESS, PLATFORM_SCHEMA, LightEntity
 import time
 import json
+from datetime import datetime, timedelta, timezone
 from .const import DEBUG_INFO
 
 AWS_REGION = "us-west-2"
@@ -117,6 +118,7 @@ class PentairCloudHub:
         self.AWS_ACCESS_KEY_ID = None
         self.AWS_SECRET_ACCESS_KEY = None
         self.AWS_SESSION_TOKEN = None
+        self.AWS_CREDENTIALS_EXPIRATION = None
         self.last_update = None
         self.username = None
         self.password = None
@@ -143,10 +145,27 @@ class PentairCloudHub:
                 self.LOGGER.error("Exception while refreshing Pentair Cloud token (empty id token).")
                 return False
             self.AWS_TOKEN = new_token
-            return previous_token != new_token
+            token_changed = previous_token != new_token
+            if token_changed:
+                self.AWS_IDENTITY_ID = None
+                self.AWS_ACCESS_KEY_ID = None
+                self.AWS_SECRET_ACCESS_KEY = None
+                self.AWS_SESSION_TOKEN = None
+                self.AWS_CREDENTIALS_EXPIRATION = None
+            return token_changed
         return False
 
     def populate_AWS_and_data_fields(self) -> None:
+        try:
+            self.ensure_AWS_credentials(force=True)
+            self.populate_pentair_devices()
+        except Exception as err:
+            self.LOGGER.error(
+                "Exception while setting up Pentair Cloud (Populate AWS Fields). %s",
+                err,
+            )
+
+    def populate_AWS_credentials(self) -> bool:
         if self.AWS_TOKEN is None:
             self.populate_AWS_token()
         try:
@@ -162,17 +181,68 @@ class PentairCloudHub:
                 IdentityId=self.AWS_IDENTITY_ID,
                 Logins={AWS_COGNITO_ENDPOINT + "/" + AWS_USER_POOL_ID: self.AWS_TOKEN},
             )
-            self.AWS_ACCESS_KEY_ID = response["Credentials"]["AccessKeyId"]
-            self.AWS_SECRET_ACCESS_KEY = response["Credentials"]["SecretKey"]
-            self.AWS_SESSION_TOKEN = response["Credentials"]["SessionToken"]
+            credentials = response["Credentials"]
+            self.AWS_ACCESS_KEY_ID = credentials["AccessKeyId"]
+            self.AWS_SECRET_ACCESS_KEY = credentials["SecretKey"]
+            self.AWS_SESSION_TOKEN = credentials["SessionToken"]
+            self.AWS_CREDENTIALS_EXPIRATION = credentials.get("Expiration")
             if DEBUG_INFO:
                 self.LOGGER.info("Pentair Cloud complete Populate AWS Fields")
-            self.populate_pentair_devices()
+            return True
         except Exception as err:
             self.LOGGER.error(
                 "Exception while setting up Pentair Cloud (Populate AWS Fields). %s",
                 err,
             )
+            return False
+
+    def _aws_credentials_expiring_soon(self) -> bool:
+        expiration = self.AWS_CREDENTIALS_EXPIRATION
+        if expiration is None:
+            return False
+        if expiration.tzinfo is None:
+            expiration = expiration.replace(tzinfo=timezone.utc)
+        return expiration <= datetime.now(timezone.utc) + timedelta(minutes=5)
+
+    def ensure_AWS_credentials(self, force: bool = False) -> bool:
+        token_changed = self.populate_AWS_token()
+        if self.AWS_TOKEN is None:
+            return False
+        missing_credentials = any(
+            value is None
+            for value in (
+                self.AWS_ACCESS_KEY_ID,
+                self.AWS_SECRET_ACCESS_KEY,
+                self.AWS_SESSION_TOKEN,
+            )
+        )
+        if force or token_changed or missing_credentials or self._aws_credentials_expiring_soon():
+            return self.populate_AWS_credentials()
+        return True
+
+    def _is_expired_security_token_response(self, response_data) -> bool:
+        if not isinstance(response_data, dict):
+            return False
+        message = str(response_data.get("message", "")).lower()
+        return "security token" in message and "expired" in message
+
+    def _request_with_fresh_auth(self, request_func, endpoint: str, **kwargs):
+        last_response = None
+        last_response_data = None
+        for attempt in range(2):
+            last_response = request_func(
+                endpoint,
+                auth=self.get_AWS_auth(),
+                headers=self.get_pentair_header(),
+                **kwargs,
+            )
+            last_response_data = last_response.json()
+            if attempt == 0 and self._is_expired_security_token_response(last_response_data):
+                self.LOGGER.warning("Pentair Cloud AWS credentials expired; refreshing and retrying.")
+                if self.ensure_AWS_credentials(force=True):
+                    continue
+            break
+        return last_response, last_response_data
 
     def get_pentair_header(self) -> str:
         return {
@@ -191,17 +261,13 @@ class PentairCloudHub:
         )
 
     def populate_pentair_devices(self) -> None:
-        if self.AWS_TOKEN is not None:
+        if self.ensure_AWS_credentials():
             try:
                 # GetDeviceConfiguration
                 endpoint = PENTAIR_ENDPOINT + PENTAIR_DEVICES_PATH
-                response = requests.get(
-                    endpoint,
-                    auth=self.get_AWS_auth(),
-                    headers=self.get_pentair_header(),
-                )
+                response, response_data = self._request_with_fresh_auth(requests.get, endpoint)
                 devices = []
-                for device in response.json()["data"]:
+                for device in response_data["data"]:
                     if device["deviceType"] == "IF31":
                         if device["status"] == "ACTIVE":
                             devices.append(
@@ -248,8 +314,7 @@ class PentairCloudHub:
             if DEBUG_INFO:
                 self.LOGGER.info("Pentair Cloud - Update Devices Status")
             self.last_update = time.time()
-            self.populate_AWS_token()
-            if self.AWS_TOKEN is not None:
+            if self.ensure_AWS_credentials():
                 response_data = None
                 try:
                     devices_json_list = []
@@ -259,13 +324,11 @@ class PentairCloudHub:
                         '{"deviceIds": [' + ",".join(devices_json_list) + "]}"
                     )
                     endpoint = PENTAIR_ENDPOINT + PENTAIR_DEVICES_2_PATH
-                    response = requests.post(
+                    response, response_data = self._request_with_fresh_auth(
+                        requests.post,
                         endpoint,
-                        auth=self.get_AWS_auth(),
-                        headers=self.get_pentair_header(),
                         data=devices_json,
                     )
-                    response_data = response.json()
                     for device_response in response_data["response"]["data"]:
                         for device in self.devices:
                             if device.pentair_device_id == device_response["deviceId"]:
@@ -332,8 +395,7 @@ class PentairCloudHub:
                 f"Pentair Cloud - Activating program {program_id} on device {deviceId}"
             )
         
-        self.populate_AWS_token()
-        if self.AWS_TOKEN is not None:
+        if self.ensure_AWS_credentials():
             try:
                 endpoint = PENTAIR_ENDPOINT + PENTAIR_DEVICE_SERVICE_PATH + deviceId
                 field_name = f"zp{program_id}e10"
@@ -342,10 +404,9 @@ class PentairCloudHub:
                 if DEBUG_INFO:
                     self.LOGGER.info(f"Sending payload: {payload} to {endpoint}")
                 
-                response = requests.put(
+                response, response_data = self._request_with_fresh_auth(
+                    requests.put,
                     endpoint,
-                    auth=self.get_AWS_auth(),
-                    headers=self.get_pentair_header(),
                     data=json.dumps(payload),
                 )
                 
@@ -353,7 +414,6 @@ class PentairCloudHub:
                     self.LOGGER.info(f"Response status: {response.status_code}")
                     self.LOGGER.info(f"Response body: {response.text}")
                 
-                response_data = response.json()
                 if response_data.get("data", {}).get("code") != "set_device_success":
                     self.LOGGER.error(f"Failed to activate program: {response_data}")
                     raise Exception("Wrong response code activating program")
@@ -389,8 +449,7 @@ class PentairCloudHub:
                 f"Pentair Cloud - Deactivating program {program_id} on device {deviceId}"
             )
         
-        self.populate_AWS_token()
-        if self.AWS_TOKEN is not None:
+        if self.ensure_AWS_credentials():
             try:
                 endpoint = PENTAIR_ENDPOINT + PENTAIR_DEVICE_SERVICE_PATH + deviceId
                 field_name = f"zp{program_id}e10"
@@ -439,10 +498,9 @@ class PentairCloudHub:
                 if DEBUG_INFO:
                     self.LOGGER.info(f"Sending deactivation payload: {payload}")
                 
-                response = requests.put(
+                response, response_data = self._request_with_fresh_auth(
+                    requests.put,
                     endpoint,
-                    auth=self.get_AWS_auth(),
-                    headers=self.get_pentair_header(),
                     data=json.dumps(payload),
                 )
                 
@@ -450,7 +508,6 @@ class PentairCloudHub:
                     self.LOGGER.info(f"Stop response status: {response.status_code}")
                     self.LOGGER.info(f"Stop response body: {response.text}")
                 
-                response_data = response.json()
                 if response_data.get("data", {}).get("code") != "set_device_success":
                     self.LOGGER.error(f"Failed to deactivate program: {response_data}")
                     raise Exception("Wrong response code deactivating program")
