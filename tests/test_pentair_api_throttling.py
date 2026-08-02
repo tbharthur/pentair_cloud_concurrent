@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import sys
 import types
 from pathlib import Path
@@ -261,6 +262,74 @@ def test_device_population_replaces_existing_devices_instead_of_appending(monkey
         assert hub.devices[0].nickname == "Pool Pump"
 
 
+def test_concurrent_program_activation_returns_success(monkeypatch):
+    mod = import_pentair_module("pentaircloud_modified.py")
+    logger = FakeLogger()
+    hub = mod.PentairCloudHub(logger)
+    hub.AWS_TOKEN = "token"
+    hub.AWS_ACCESS_KEY_ID = "key"
+    hub.AWS_SECRET_ACCESS_KEY = "secret"
+    hub.AWS_SESSION_TOKEN = "session"
+    device = mod.PentairDevice(logger, "device-1", "Pool Pump")
+    device.programs = [mod.PentairPumpProgram(7, "Speed 50", 2, 2)]
+    hub.devices = [device]
+
+    class SuccessResponse:
+        status_code = 200
+        text = '{"data":{"code":"set_device_success"}}'
+
+        def json(self):
+            return {"data": {"code": "set_device_success"}}
+
+    payloads = []
+
+    def put_success(*args, **kwargs):
+        payloads.append(kwargs["data"])
+        return SuccessResponse()
+
+    monkeypatch.setattr(mod.requests, "put", put_success)
+
+    assert hub.activate_program_concurrent("device-1", 7) is True
+    assert device.programs[0].running is True
+    assert device.programs[0].control_value == 3
+    assert device.active_pump_program == 7
+    assert len(payloads) == 2
+    assert json.loads(payloads[0]) == {"payload": {"zp7e10": "3"}}
+    assert json.loads(payloads[1]) == {"payload": {"p2": "99"}}
+
+
+def test_relay_program_activation_does_not_select_a_pump_program(monkeypatch):
+    mod = import_pentair_module("pentaircloud_modified.py")
+    logger = FakeLogger()
+    hub = mod.PentairCloudHub(logger)
+    hub.AWS_TOKEN = "token"
+    hub.AWS_ACCESS_KEY_ID = "key"
+    hub.AWS_SECRET_ACCESS_KEY = "secret"
+    hub.AWS_SESSION_TOKEN = "session"
+    device = mod.PentairDevice(logger, "device-1", "Pool Pump")
+    device.programs = [mod.PentairPumpProgram(6, "Heater", 2, 0)]
+    hub.devices = [device]
+
+    class SuccessResponse:
+        status_code = 200
+        text = '{"data":{"code":"set_device_success"}}'
+
+        def json(self):
+            return {"data": {"code": "set_device_success"}}
+
+    payloads = []
+
+    def put_success(*args, **kwargs):
+        payloads.append(kwargs["data"])
+        return SuccessResponse()
+
+    monkeypatch.setattr(mod.requests, "put", put_success)
+
+    assert hub.activate_program_concurrent("device-1", 6) is True
+    assert len(payloads) == 1
+    assert json.loads(payloads[0]) == {"payload": {"zp6e10": "3"}}
+
+
 def test_polling_intervals_are_rate_limit_friendly():
     coordinator = Path("custom_components/pentair_cloud/coordinator.py").read_text()
 
@@ -291,9 +360,18 @@ def test_fan_slider_snaps_to_real_pentair_speed_programs():
     fan = Path("custom_components/pentair_cloud/fan.py").read_text()
 
     assert "SLIDER_DEBOUNCE_SECONDS = 2.0" in fan
-    assert "SPEED_STEPS = (0, 25, 50, 75, 100)" in fan
+    assert "SPEED_STEPS = (0, 30, 50, 100)" in fan
     assert "def _snap_requested_speed" in fan
     assert "actual_speed = self._snap_requested_speed(speed)" in fan
+
+
+def test_fan_resolves_manual_controls_by_program_name():
+    fan = Path("custom_components/pentair_cloud/fan.py").read_text()
+
+    assert '\"low\": (\"Speed 30\", 30)' in fan
+    assert '\"medium\": (\"Speed 50\", 50)' in fan
+    assert '\"max\": (\"Quick Clean\", 100)' in fan
+    assert "program_ids_by_name" in fan
 
 
 def test_fan_reports_percent_speed_when_pentair_motor_speed_is_percent_like():
@@ -317,11 +395,38 @@ def test_fan_reports_percent_speed_when_pentair_motor_speed_is_percent_like():
         device=device,
         coordinator=None,
         hass=types.SimpleNamespace(),
-        program_mappings={"low": 3, "medium": 7, "high": 4, "max": 5},
+        program_mappings={"low": 5, "medium": 7, "max": 1},
     )
 
     assert fan.is_on is True
     assert fan.percentage == 50
+
+
+def test_fan_reports_thirty_percent_without_rounding_to_twenty_five():
+    mod = import_package_module("fan")
+    device = types.SimpleNamespace(
+        nickname="Pool",
+        pentair_device_id="device-1",
+        active_pump_program=4,
+        motor_speed=30.0,
+        power=100,
+        flow_rate=18.4,
+        relay1_on=False,
+        relay2_on=False,
+        programs=[],
+    )
+
+    fan = mod.PentairPumpFan(
+        hub=types.SimpleNamespace(),
+        device=device,
+        coordinator=None,
+        hass=types.SimpleNamespace(),
+        program_mappings={"low": 5, "medium": 7, "max": 1},
+    )
+
+    assert fan.is_on is True
+    assert fan.percentage == 30
+    assert fan.speed_count == 10
 
 
 def test_raw_pentair_program_lights_are_not_created():

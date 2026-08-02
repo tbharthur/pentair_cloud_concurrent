@@ -19,12 +19,14 @@ from .pentaircloud import PentairCloudHub, PentairDevice, PentairPumpProgram
 
 _LOGGER = logging.getLogger(__name__)
 
-SPEED_STEPS = (0, 25, 50, 75, 100)
+SPEED_STEPS = (0, 30, 50, 100)
 SLIDER_DEBOUNCE_SECONDS = 2.0
 
-# Note: Actual program mappings come from config_entry.data
-# The old hardcoded SPEED_TO_PROGRAM and PROGRAM_TO_SPEED have been removed
-# as they assumed fixed program IDs which may not match user's setup
+PROGRAM_NAME_TO_CONTROL = {
+    "low": ("Speed 30", 30),
+    "medium": ("Speed 50", 50),
+    "max": ("Quick Clean", 100),
+}
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -36,18 +38,26 @@ async def async_setup_entry(
     hub = hass.data[DOMAIN][config_entry.entry_id].get("hub") or hass.data[DOMAIN][config_entry.entry_id].get("pentair_cloud_hub")
     coordinator = hass.data[DOMAIN][config_entry.entry_id].get("coordinator")
     
-    # Get the program mappings from config
-    program_mappings = {
-        "low": config_entry.data.get("speed_low", 3),
-        "medium": config_entry.data.get("speed_medium", 2),
-        "high": config_entry.data.get("speed_high", 4),
-        "max": config_entry.data.get("speed_max", 1),
-    }
-    
-    _LOGGER.info(f"Using program mappings from config: {program_mappings}")
-    
     entities = []
     for device in hub.get_devices():
+        # Schedule and legacy entries occupy programs 2-4. Resolve the actual
+        # HomeKit controls by name so stale config-entry IDs cannot start or
+        # stop the wrong program.
+        program_ids_by_name = {program.name: program.id for program in device.programs}
+        program_mappings = {
+            control: program_ids_by_name.get(program_name)
+            for control, (program_name, _speed) in PROGRAM_NAME_TO_CONTROL.items()
+        }
+        missing = [control for control, program_id in program_mappings.items() if program_id is None]
+        if missing:
+            _LOGGER.error(
+                "Cannot create pump control; missing Pentair programs for: %s",
+                ", ".join(missing),
+            )
+            continue
+
+        _LOGGER.info("Using pump program mappings resolved by name: %s", program_mappings)
+
         # Create fan entity for each pump device with config mappings
         fan_entity = PentairPumpFan(hub, device, coordinator, hass, program_mappings)
         entities.append(fan_entity)
@@ -75,10 +85,8 @@ class PentairPumpFan(CoordinatorEntity, FanEntity):
         
         # Create reverse mapping for state updates
         self._program_to_speed = {
-            program_mappings["low"]: 25,
-            program_mappings["medium"]: 50,
-            program_mappings["high"]: 75,
-            program_mappings["max"]: 100,
+            program_mappings[control]: speed
+            for control, (_program_name, speed) in PROGRAM_NAME_TO_CONTROL.items()
         }
         
         _LOGGER.info(f"Fan entity initialized with program mappings: {self._program_mappings}")
@@ -129,7 +137,8 @@ class PentairPumpFan(CoordinatorEntity, FanEntity):
     @property
     def speed_count(self) -> int:
         """Return number of speeds."""
-        return 4  # Low, Medium, High, Max
+        # HomeKit can land on 30%; unsupported values are snapped below.
+        return 10
     
     @property
     def supported_features(self) -> int:
@@ -234,12 +243,10 @@ class PentairPumpFan(CoordinatorEntity, FanEntity):
             # Map speed percentage to appropriate program using actual config mappings
             if actual_speed == 0:
                 target_program_id = None
-            elif actual_speed == 25:
+            elif actual_speed == 30:
                 target_program_id = self._program_mappings["low"]
             elif actual_speed == 50:
                 target_program_id = self._program_mappings["medium"]
-            elif actual_speed == 75:
-                target_program_id = self._program_mappings["high"]
             else:
                 target_program_id = self._program_mappings["max"]
             
@@ -306,9 +313,8 @@ class PentairPumpFan(CoordinatorEntity, FanEntity):
         
         if preset_mode is not None:
             preset_speed = {
-                "low": 25,
+                "low": 30,
                 "medium": 50,
-                "high": 75,
                 "max": 100,
             }.get(preset_mode, 50)
             await self.async_set_percentage(preset_speed)

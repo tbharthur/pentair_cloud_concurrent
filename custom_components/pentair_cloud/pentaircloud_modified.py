@@ -388,7 +388,7 @@ class PentairCloudHub:
                     "Pentair Cloud - Update Devices Status Requested but before min time"
                 )
 
-    def activate_program_concurrent(self, deviceId: str, program_id: int) -> None:
+    def activate_program_concurrent(self, deviceId: str, program_id: int) -> bool:
         """Activate a program allowing concurrent activation."""
         if DEBUG_INFO:
             self.LOGGER.info(
@@ -418,6 +418,8 @@ class PentairCloudHub:
                     self.LOGGER.error(f"Failed to activate program: {response_data}")
                     raise Exception("Wrong response code activating program")
                 
+                activated_program = None
+
                 # Find and update the program state
                 for device in self.devices:
                     if device.pentair_device_id == deviceId:
@@ -425,16 +427,38 @@ class PentairCloudHub:
                             if program.id == program_id:
                                 program.running = True
                                 program.control_value = 3
+                                activated_program = program
+
+                        # Pump-speed programs need the same follow-up write the
+                        # Pentair app sends. Relay programs deliberately skip
+                        # it so lights and heat remain concurrently active.
+                        if activated_program and (
+                            "Speed" in activated_program.name
+                            or "Quick Clean" in activated_program.name
+                            or "Daily Schedule" in activated_program.name
+                        ):
+                            response, response_data = self._request_with_fresh_auth(
+                                requests.put,
+                                endpoint,
+                                data=json.dumps({"payload": {"p2": "99"}}),
+                            )
+                            if response_data.get("data", {}).get("code") != "set_device_success":
+                                raise Exception("Wrong response code selecting active pump program")
+                            device.active_pump_program = program_id
+
+                return True
                 
             except Exception as err:
                 self.LOGGER.error(
                     "Exception with Pentair API (Activate Program). %s",
                     err,
                 )
+                return False
         else:
             self.LOGGER.error(
                 "Exception while activating program (Empty token)."
             )
+            return False
             return False
 
     def deactivate_program(self, deviceId: str, program_id: int) -> None:

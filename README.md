@@ -53,11 +53,13 @@ Setting up a custom repository is done by:
 
 For this integration to work properly, you need to configure your Pentair programs as follows:
 
-**Speed Programs** (required for fan entity speed control):
-- **Program 1**: Quick Clean or Max Speed (100%)
-- **Program 2**: Regular or Medium Speed (50%)
-- **Program 3**: Low Speed (30%)
-- **Program 4**: Service Mode or High Speed (75%)
+**Pump Programs used by the current installation:**
+- **Program 1**: Quick Clean (100%; also used for HomeKit maximum)
+- **Program 2**: Base AM schedule (30%, midnight-10 AM)
+- **Program 3**: Speed 25 (legacy manual program; not exposed to HomeKit)
+- **Program 4**: Base PM schedule (30%, 1 PM-11:59 PM)
+- **Program 5**: Speed 30 (manual; used for HomeKit low)
+- **Program 7**: Speed 50 (manual; used for HomeKit medium and heater safety)
 
 **Relay Control Programs** (configure these with appropriate relay settings):
 - **Program 5 or 6**: Lights (Relay 1 ON, Relay 2 OFF)
@@ -80,7 +82,7 @@ After installation and configuration, you'll have these entities:
 - **Type**: Fan entity with speed control
 - **Control**: 
   - Percentage: 0-100% speed control
-  - Preset Modes: Off, Low (30%), Medium (50%), High (75%), Max (100%)
+  - Slider steps: Off, Low (30%), Medium (50%), Max (100%)
 - **HomeKit**: Appears as a fan with speed control
 - **Safety**: Enforces minimum 50% speed when heater is on
 
