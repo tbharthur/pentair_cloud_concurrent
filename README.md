@@ -55,9 +55,9 @@ For this integration to work properly, you need to configure your Pentair progra
 
 **Pump Programs used by the current installation:**
 - **Program 1**: Quick Clean (100%; also used for HomeKit maximum)
-- **Program 2**: Base AM schedule (30%, midnight-10 AM)
+- **Program 2**: Base AM schedule (30%, midnight-8 AM)
 - **Program 3**: Speed 25 (legacy manual program; not exposed to HomeKit)
-- **Program 4**: Base PM schedule (30%, 1 PM-11:59 PM)
+- **Program 4**: Base PM schedule (30%, 4 PM-11:59 PM)
 - **Program 5**: Speed 30 (manual; used for HomeKit low)
 - **Program 7**: Speed 50 (manual; used for HomeKit medium and heater safety)
 
